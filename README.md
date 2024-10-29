@@ -10,7 +10,7 @@ The fundamental value of a business consists of two components:
 \text{Total Value} = \text{Net Asset Value} + \text{Present Value of Future Cash Flows}
 ```
 
-Investors pay a premium for liquidity. Therefore, illiquid stocks may have higher value. Also, small market cap stocks may not be worth it for larger players, so there may be more inefficiencies left unexploited.
+Investors pay a premium for liquidity. Therefore, illiquid stocks may have higher value. Also, small market cap stocks may not be worth it for larger players, so there may be more inefficiencies left unexploited. As the market recognizes the true value of the company, the stock trend towards fair value.
 
 ## 1. Asset Value Calculation
 
