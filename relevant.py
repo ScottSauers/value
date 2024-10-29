@@ -8,7 +8,7 @@ import logging
 import re
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)  # Set to DEBUG for detailed logs
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -22,60 +22,30 @@ def clean_text(text: str) -> str:
     """Clean text by removing extra whitespace and special characters."""
     return ' '.join(text.split()).strip()
 
-def extract_dates_from_headers(headers: List[str]) -> List[str]:
-    """Extract dates from header cells if present."""
-    date_pattern = re.compile(r'(\d{4})')  # Simplified to extract years
-    dates = []
-    for header in headers:
-        matches = date_pattern.findall(header)
-        if matches:
-            dates.extend(matches)
-    return dates
+def extract_years_from_string(s: str) -> List[str]:
+    """Extract four-digit years from a string."""
+    return re.findall(r'(?:19|20)\d{2}', s)
 
-def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, Any]]:
+def parse_table_row(row: List[str], headers: List[str]) -> Optional[List[Dict[str, Any]]]:
     """
-    Parse a table row into a meaningful key-value pair if possible.
+    Parse a table row into a list of dictionaries mapping headers to cell values.
     Args:
         row: The data row
         headers: The header row cells
     """
-    if len(row) < 2 or not headers:
+    if not headers or not row or len(row) != len(headers):
         return None
 
-    label = clean_text(row[0]).lower()
-    if not label:
-        return None
-
-    value = None
-    column_name = 'N/A'
-
-    # Iterate through the cells to find the first numeric value
-    for idx, cell in enumerate(row[1:], start=1):  # Start from index 1
-        cleaned_cell = clean_text(cell)
-        # Skip if cell is empty
-        if not cleaned_cell:
-            continue
-        # Check if the cell contains a numeric value
-        if re.search(r'\d', cleaned_cell.replace(',', '').replace('.', '')):
-            # Assign the value
-            value = cleaned_cell
-            # Assign the column name based on headers
-            if headers and len(headers) > idx:
-                column_name = clean_text(headers[idx])
-                # Further clean column_name to extract the year if possible
-                year_match = re.search(r'(\d{4})', column_name)
-                if year_match:
-                    column_name = year_match.group(1)
-            break
-
-    if not value:
-        return None
-
-    return {
-        'label': label,
-        'value': value,
-        'column_name': column_name if column_name else 'N/A'
-    }
+    row_data = []
+    for header, cell in zip(headers, row):
+        header_clean = clean_text(header).lower()
+        cell_clean = clean_text(cell)
+        if header_clean and cell_clean:
+            row_data.append({
+                'label': header_clean,
+                'value': cell_clean
+            })
+    return row_data if row_data else None
 
 def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     """Save fields to a TSV file."""
@@ -88,27 +58,15 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
         f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\n")
         f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\n")
         
-        for metric, value in data['summary_metrics'].items():
-            f.write(f"{metric}\t{value}\tN/A\tSummary Metrics\n")
-        
-        sections = {
-            'Income Statement': data['income_statement'],
-            'Balance Sheet': data['balance_sheet'],
-            'Cash Flow Statement': data['cash_flow'],
-            'Key Financial Ratios': data['key_ratios']
-        }
-        
-        for section_name, items in sections.items():
+        sections = ['income_statement', 'balance_sheet', 'cash_flow']
+        for section in sections:
+            items = data.get(section, [])
             for item in items:
-                column_name = item.get('column_name', 'N/A')
-                f.write(f"{item['label']}\t{item['value']}\t{column_name}\t{section_name}\n")
+                f.write(f"{item['label']}\t{item['value']}\t{item.get('column_name', 'N/A')}\t{section.replace('_', ' ').title()}\n")
 
 class SECFieldExtractor:
     def __init__(self, company_name: str, email: str):
         self.downloader = Downloader(company_name, email)
-        
-    def _normalize_cik(self, cik: str) -> str:
-        return cik.zfill(10)
         
     def _get_company_info(self, identifier: str, filing_metadata) -> Optional[CompanyInfo]:
         try:
@@ -165,126 +123,80 @@ class SECFieldExtractor:
     def extract_financial_data(self) -> Dict[str, Any]:
         """Extract key financial data from the document."""
         data = {
-            'summary_metrics': {},
             'income_statement': [],
             'balance_sheet': [],
-            'cash_flow': [],
-            'key_ratios': []
+            'cash_flow': []
         }
         
         tables = self.soup.find_all('table')
         logger.info(f"Found {len(tables)} tables in the document.")
-        
-        # Limit detailed debugging to first 5 tables to avoid overwhelming logs
-        debug_table_limit = 5
-        
+
         for idx, table in enumerate(tables, start=1):
+            table_text = clean_text(table.get_text()).lower()
+
+            # Skip tables that are unlikely to contain financial data
+            if any(keyword in table_text for keyword in ['index', 'table of contents', 'signature', 'exhibit']):
+                logger.debug(f"Table {idx}: Skipped due to irrelevant content.")
+                continue
+
             rows = table.find_all('tr')
             if not rows:
                 logger.debug(f"Table {idx}: No rows found.")
                 continue
 
-            header_cells = []
-            header_found = False
-            actual_header = []
-            column_names = []
-
-            # Define a list of common financial header keywords
-            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date', 'balance', 'shares', 'period', 'ends', 'consolidated', 'net', 'income', 'financial']
-
-            # Iterate through the first few rows to find the header row based on keywords
-            max_header_rows = 5  # Adjust as needed based on table structure
-            current_row = 0
-            while current_row < min(max_header_rows, len(rows)):
-                potential_headers = [clean_text(cell.get_text(strip=True)) for cell in rows[current_row].find_all(['td', 'th'])]
-                
-                # Check if any of the header keywords are present in the potential headers
-                if any(any(keyword in cell.lower() for keyword in financial_header_keywords) for cell in potential_headers):
-                    header_cells = potential_headers
-                    logger.info(f"Table {idx}: Header identified in row {current_row +1}: {header_cells}")
-                    
-                    # Check if 'Years ended' or similar phrases are present to handle multi-row headers
-                    if any(re.search(r'years ended|period ended|reporting period', cell.lower()) for cell in header_cells):
-                        # Assume the next row contains the actual years
-                        if current_row +1 < len(rows):
-                            next_row_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[current_row +1].find_all(['td', 'th'])]
-                            # Extract years from the next row
-                            extracted_years = extract_dates_from_headers(next_row_cells)
-                            if extracted_years:
-                                column_names = extracted_years
-                                logger.info(f"Table {idx}: Extracted column names from next row: {column_names}")
-                                current_row += 2  # Skip the next row as it's part of the header
-                            else:
-                                column_names = header_cells
-                                logger.warning(f"Table {idx}: No years found in the next row. Using header cells as column names.")
-                                current_row +=1
-                        else:
-                            column_names = header_cells
-                            current_row +=1
-                    else:
-                        column_names = header_cells
-                        current_row +=1
-                    header_found = True
+            # Attempt to identify headers
+            headers = []
+            header_row_index = None
+            for i, row in enumerate(rows[:5]):  # Check first 5 rows for headers
+                cells = row.find_all(['th', 'td'])
+                cell_texts = [clean_text(cell.get_text()) for cell in cells]
+                if any('year' in cell.lower() or 'ended' in cell.lower() for cell in cell_texts):
+                    headers = cell_texts
+                    header_row_index = i
                     break
-                current_row +=1
 
-            if not header_found:
-                # Fallback: Assume the first row is the header if no header row was identified
-                header_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[0].find_all(['td', 'th'])]
-                column_names = extract_dates_from_headers(header_cells)
-                if not column_names:
-                    column_names = header_cells
-                rows = rows[current_row +1:]
-                logger.warning(f"Table {idx}: No header row identified based on keywords. Using first row as header: {header_cells}")
-            else:
-                rows = rows[current_row:]
+            if not headers:
+                logger.debug(f"Table {idx}: No headers found, skipping table.")
+                continue
 
-            logger.info(f"Table {idx}: Final Headers found: {column_names}")
+            # Check if headers contain financial keywords
+            financial_keywords = ['net income', 'revenue', 'assets', 'liabilities', 'equity', 'cash', 'operating activities', 'investing activities', 'financing activities']
+            if not any(any(keyword in header.lower() for keyword in financial_keywords) for header in headers):
+                logger.debug(f"Table {idx}: Headers do not contain financial keywords, skipping table.")
+                continue
 
-            # Debugging: Print sample tables for the first few tables
-            if idx <= debug_table_limit:
-                logger.debug(f"--- Table {idx} Sample ---")
-                logger.debug(f"Headers: {column_names}")
-                sample_data = []
-                # Get first 3 rows as sample
-                for sample_row in rows[:3]:
-                    sample_cells = [clean_text(cell.get_text(strip=True)) for cell in sample_row.find_all(['td', 'th'])]
-                    sample_data.append(sample_cells)
-                logger.debug(f"Sample Rows: {sample_data}")
-                logger.debug(f"--------------------------")
+            logger.info(f"Table {idx}: Processing with headers: {headers}")
 
-            parsed_rows = []
-            for row_num, row in enumerate(rows, start=1):
-                cells = [clean_text(cell.get_text(strip=True)) for cell in row.find_all(['td', 'th'])]
-                
-                # Skip entirely empty rows
-                if not any(cells):
-                    logger.debug(f"Table {idx}, Row {row_num}: Empty row skipped.")
+            # Extract data rows
+            data_rows = rows[header_row_index + 1:]
+            for row in data_rows:
+                cells = row.find_all(['td', 'th'])
+                cell_texts = [clean_text(cell.get_text()) for cell in cells]
+
+                # Skip empty rows
+                if not any(cell_texts):
                     continue
-                
-                row_data = parse_table_row(cells, column_names)
-                if row_data:
-                    parsed_rows.append(row_data)
-                else:
-                    logger.debug(f"Table {idx}, Row {row_num}: No valid data extracted.")
-            
-            if parsed_rows:
-                table_text = clean_text(table.get_text()).lower()
-                if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
-                    data['income_statement'].extend(parsed_rows)
-                    logger.info(f"Table {idx}: Classified as 'Income Statement'")
-                elif any(keyword in table_text for keyword in ['balance sheet', 'balance sheets']):
-                    data['balance_sheet'].extend(parsed_rows)
-                    logger.info(f"Table {idx}: Classified as 'Balance Sheet'")
-                elif any(keyword in table_text for keyword in ['cash flow', 'cash flows']):
-                    data['cash_flow'].extend(parsed_rows)
-                    logger.info(f"Table {idx}: Classified as 'Cash Flow Statement'")
-                else:
-                    data['key_ratios'].extend(parsed_rows)
-                    logger.info(f"Table {idx}: Classified as 'Key Financial Ratios'")
-            else:
-                logger.debug(f"Table {idx}: No valid rows found for data extraction.")
-        
+
+                # Adjust row if number of cells doesn't match headers
+                if len(cell_texts) < len(headers):
+                    # Pad the row with empty strings
+                    cell_texts.extend([''] * (len(headers) - len(cell_texts)))
+                elif len(cell_texts) > len(headers):
+                    # Trim the row to match the headers
+                    cell_texts = cell_texts[:len(headers)]
+
+                parsed_row = parse_table_row(cell_texts, headers)
+                if not parsed_row:
+                    continue
+
+                # Classify and store the data
+                if any('income' in header.lower() for header in headers):
+                    data['income_statement'].extend(parsed_row)
+                elif any('asset' in header.lower() or 'liabilit' in header.lower() or 'equity' in header.lower() for header in headers):
+                    data['balance_sheet'].extend(parsed_row)
+                elif any('cash' in header.lower() for header in headers):
+                    data['cash_flow'].extend(parsed_row)
+
         return data
 
 def main():
@@ -303,8 +215,8 @@ def main():
     data = extractor.get_latest_10k_fields(identifier)
     
     if data:
-        print(data)
         save_fields_to_tsv(data)
+        print(f"Data extraction complete. Results saved to sec_fields.tsv")
     else:
         print("Failed to extract fields from 10-K")
 
