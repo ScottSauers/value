@@ -8,7 +8,7 @@ import logging
 import re
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)  # Set to DEBUG for detailed logs
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -22,16 +22,17 @@ def clean_text(text: str) -> str:
     """Clean text by removing extra whitespace and special characters."""
     return ' '.join(text.split()).strip()
 
-def extract_dates_from_headers(headers: List[str]) -> Optional[str]:
-    """Extract date from headers if present."""
+def extract_dates_from_headers(headers: List[str]) -> List[str]:
+    """Extract dates from header cells if present."""
     date_pattern = re.compile(r'([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})')
+    dates = []
     for header in headers:
-        match = date_pattern.search(header)
-        if match:
-            return match.group(1)
-    return None
+        matches = date_pattern.findall(header)
+        if matches:
+            dates.extend(matches)
+    return dates
 
-def parse_table_row(row: List[str], headers: List[str] = None) -> Optional[Dict[str, Any]]:
+def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, Any]]:
     """
     Parse a table row into a meaningful key-value pair if possible.
     Args:
@@ -170,22 +171,22 @@ class SECFieldExtractor:
         tables = self.soup.find_all('table')
         logger.info(f"Found {len(tables)} tables in the document.")
         
-        # Limit detailed debugging to first 3 tables
+        # Limit detailed debugging to first 3 tables to avoid overwhelming logs
         debug_table_limit = 3
         
-        for idx, table in enumerate(tables):
+        for idx, table in enumerate(tables, start=1):
             rows = table.find_all('tr')
             if not rows:
-                logger.debug(f"Table {idx+1}: No rows found.")
+                logger.debug(f"Table {idx}: No rows found.")
                 continue
 
             header_cells = []
             header_found = False
 
             # Define a list of common financial header keywords
-            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date', 'balance', 'shares']
+            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date', 'balance', 'shares', 'period', 'ends']
 
-            # Attempt to identify header row based on keywords
+            # Iterate through the first few rows to find the header row based on keywords
             max_header_rows = 5  # Adjust as needed based on table structure
             for i in range(min(max_header_rows, len(rows))):
                 potential_headers = [clean_text(cell.get_text(strip=True)) for cell in rows[i].find_all(['td', 'th'])]
@@ -195,23 +196,27 @@ class SECFieldExtractor:
                     header_cells = potential_headers
                     rows = rows[i+1:]  # Exclude the header row from data rows
                     header_found = True
-                    logger.info(f"Table {idx+1}: Header identified in row {i+1}: {header_cells}")
+                    logger.info(f"Table {idx}: Header identified in row {i+1}: {header_cells}")
                     break
-            
+
             if not header_found:
                 # Fallback: Assume the first row is the header if no header row was identified
                 header_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[0].find_all(['td', 'th'])]
                 rows = rows[1:]  # Exclude the first row from data rows
-                logger.warning(f"Table {idx+1}: No header row identified based on keywords. Using first row as header: {header_cells}")
+                logger.warning(f"Table {idx}: No header row identified based on keywords. Using first row as header: {header_cells}")
             
-            logger.info(f"Table {idx+1}: Final Headers found: {header_cells}")
+            logger.info(f"Table {idx}: Final Headers found: {header_cells}")
             
-            # Debugging: Print sample tables
-            if idx < debug_table_limit:
-                logger.debug(f"--- Table {idx+1} Sample ---")
+            # Debugging: Print sample tables for the first few tables
+            if idx <= debug_table_limit:
+                logger.debug(f"--- Table {idx} Sample ---")
                 logger.debug(f"Headers: {header_cells}")
-                sample_rows = [clean_text(cell.get_text(strip=True)) for cell in rows[:3].find_all(['td', 'th'])]
-                logger.debug(f"Sample Rows: {sample_rows}")
+                sample_data = []
+                # Get first 3 rows as sample
+                for sample_row in rows[:3]:
+                    sample_cells = [clean_text(cell.get_text(strip=True)) for cell in sample_row.find_all(['td', 'th'])]
+                    sample_data.append(sample_cells)
+                logger.debug(f"Sample Rows: {sample_data}")
                 logger.debug(f"--------------------------")
             
             parsed_rows = []
@@ -221,29 +226,30 @@ class SECFieldExtractor:
                 
                 # Skip entirely empty rows
                 if not any(cells):
-                    logger.debug(f"Table {idx+1}, Row {row_num}: Empty row skipped.")
+                    logger.debug(f"Table {idx}, Row {row_num}: Empty row skipped.")
                     continue
                 
                 row_data = parse_table_row(cells, header_cells)
                 if row_data:
                     parsed_rows.append(row_data)
                 else:
-                    logger.debug(f"Table {idx+1}, Row {row_num}: No valid data extracted.")
+                    logger.debug(f"Table {idx}, Row {row_num}: No valid data extracted.")
             
             if parsed_rows:
                 table_text = clean_text(table.get_text()).lower()
+                # **Section Classification based on table headers or content**
                 if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
                     data['income_statement'].extend(parsed_rows)
-                    logger.info(f"Table {idx+1}: Classified as 'Income Statement'")
+                    logger.info(f"Table {idx}: Classified as 'Income Statement'")
                 elif any(keyword in table_text for keyword in ['balance sheet', 'balance sheets']):
                     data['balance_sheet'].extend(parsed_rows)
-                    logger.info(f"Table {idx+1}: Classified as 'Balance Sheet'")
+                    logger.info(f"Table {idx}: Classified as 'Balance Sheet'")
                 elif any(keyword in table_text for keyword in ['cash flow', 'cash flows']):
                     data['cash_flow'].extend(parsed_rows)
-                    logger.info(f"Table {idx+1}: Classified as 'Cash Flow Statement'")
+                    logger.info(f"Table {idx}: Classified as 'Cash Flow Statement'")
                 else:
                     data['key_ratios'].extend(parsed_rows)
-                    logger.info(f"Table {idx+1}: Classified as 'Key Financial Ratios'")
+                    logger.info(f"Table {idx}: Classified as 'Key Financial Ratios'")
         
         all_text = clean_text(self.soup.get_text()).lower()
         
