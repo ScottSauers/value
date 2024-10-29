@@ -28,32 +28,32 @@ def parse_table_row(row: List[str], headers: List[str] = None) -> Optional[Dict[
         row: The data row
         headers: The header row cells
     """
-    if len(row) < 2:
+    if len(row) < 2 or not headers:
         return None
     
     label = clean_text(row[0]).lower()
+    if not label:
+        return None
     
     value = None
-    column_name = None
-    value_idx = None
+    column_name = 'N/A'
     
-    for idx, cell in enumerate(row):
+    # First numeric cell after the label is the value
+    for idx, cell in enumerate(row[1:], start=1):  # Start from index 1
         cleaned_cell = clean_text(cell)
-        if idx > 0 and cleaned_cell and any(c.isdigit() for c in cleaned_cell):
+        if cleaned_cell and any(c.isdigit() for c in cleaned_cell):
             value = cleaned_cell
-            value_idx = idx
+            if headers and len(headers) > idx:
+                column_name = clean_text(headers[idx])
             break
     
-    if value_idx is not None and headers and len(headers) > value_idx:
-        column_name = clean_text(headers[value_idx])
-    
-    if not label or not value:
+    if not value:
         return None
     
     return {
         'label': label,
         'value': value,
-        'column_name': column_name if column_name else 'N/A'
+        'column_name': column_name
     }
 
 def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
@@ -152,44 +152,53 @@ class SECFieldExtractor:
         }
         
         tables = self.soup.find_all('table')
-        for table in tables:
+        logger.info(f"Found {len(tables)} tables in the document.")
+        
+        for idx, table in enumerate(tables):
             rows = table.find_all('tr')
             if not rows:
+                logger.debug(f"Table {idx+1}: No rows found.")
                 continue
-
+    
             header_cells = []
-            for i in range(min(3, len(rows))):
-                potential_headers = [clean_text(cell.get_text(strip=True)) 
-                                   for cell in rows[i].find_all(['td', 'th'])]
-                
-                has_dates = any(re.search(r'(19|20)\d{2}|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec', cell) 
-                              for cell in potential_headers)
-                
-                if has_dates:
-                    header_cells = potential_headers
-                    rows = rows[i+1:]
-                    break
-                    
-            logger.info(f"Headers found: {header_cells}")
-            
+            if len(rows) > 0:
+                header_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[0].find_all(['td', 'th'])]
+                rows = rows[1:]  # Exclude the header row from data rows
+                logger.info(f"Table {idx+1}: Headers found: {header_cells}")
+            else:
+                logger.warning(f"Table {idx+1}: No rows to process.")
+                continue
+    
             parsed_rows = []
             
-            for row in rows:
-                cells = [cell.get_text(strip=True) for cell in row.find_all(['td', 'th'])]
+            for row_num, row in enumerate(rows, start=2):  # Start counting from 2 considering header
+                cells = [clean_text(cell.get_text(strip=True)) for cell in row.find_all(['td', 'th'])]
+                
+                # Skip empty rows
+                if not any(cells):
+                    logger.debug(f"Table {idx+1}, Row {row_num}: Empty row skipped.")
+                    continue
+                
                 row_data = parse_table_row(cells, header_cells)
                 if row_data:
                     parsed_rows.append(row_data)
+                else:
+                    logger.debug(f"Table {idx+1}, Row {row_num}: No valid data extracted.")
             
             if parsed_rows:
                 table_text = clean_text(table.get_text()).lower()
-                if 'income statement' in table_text or 'statement of operations' in table_text:
+                if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
                     data['income_statement'].extend(parsed_rows)
+                    logger.info(f"Table {idx+1}: Classified as 'Income Statement'")
                 elif 'balance sheet' in table_text:
                     data['balance_sheet'].extend(parsed_rows)
+                    logger.info(f"Table {idx+1}: Classified as 'Balance Sheet'")
                 elif 'cash flow' in table_text:
                     data['cash_flow'].extend(parsed_rows)
+                    logger.info(f"Table {idx+1}: Classified as 'Cash Flow Statement'")
                 else:
                     data['key_ratios'].extend(parsed_rows)
+                    logger.info(f"Table {idx+1}: Classified as 'Key Financial Ratios'")
         
         all_text = clean_text(self.soup.get_text()).lower()
         
