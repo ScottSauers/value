@@ -151,7 +151,7 @@ If we expect there are many stocks with similar risks and returns, this method w
 
 Alternatively, optimal portfolio weights can be determined.
 
-et R be a random vector of asset returns and w be the vector of portfolio weights. The optimization requires two key quantities:
+Let R be a random vector of asset returns and w be the vector of portfolio weights. The optimization requires two key quantities:
 
 ```math
 \mu_i = \text{Value Ratio}_i
