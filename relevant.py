@@ -6,9 +6,10 @@ from bs4 import BeautifulSoup
 from dataclasses import dataclass
 import logging
 import re
+import pandas as pd
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)  # Set to DEBUG for detailed logs
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -169,117 +170,56 @@ class SECFieldExtractor:
             'key_ratios': []
         }
         
-        tables = self.soup.find_all('table')
-        logger.info(f"Found {len(tables)} tables in the document.")
+        # Use pandas to read all tables
+        try:
+            tables = pd.read_html(str(self.soup), header=0, flavor='bs4')
+            logger.info(f"Found {len(tables)} tables in the document.")
+        except Exception as e:
+            logger.error(f"Error reading tables with pandas: {e}")
+            return data
         
-        for idx, table in enumerate(tables, start=1):
-            logger.debug(f"Processing Table {idx}")
-            rows = table.find_all('tr')
-            if not rows:
-                logger.debug(f"Table {idx}: No rows found.")
-                continue
-
-            # Attempt to identify header row
-            header_cells = []
-            header_found = False
-            actual_header = []
-            column_names = []
-
-            # Define a list of common financial header keywords
-            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date', 'balance', 'shares', 'period', 'ends', 'consolidated', 'net', 'income', 'financial']
-
-            # Iterate through the first few rows to find the header row based on keywords
-            max_header_rows = 5  # Adjust as needed based on table structure
-            current_row = 0
-            while current_row < min(max_header_rows, len(rows)):
-                potential_headers = [clean_text(cell.get_text(strip=True)) for cell in rows[current_row].find_all(['td', 'th'])]
-                
-                # Check if any of the header keywords are present in the potential headers
-                if any(any(keyword in cell.lower() for keyword in financial_header_keywords) for cell in potential_headers):
-                    header_cells = potential_headers
-                    logger.debug(f"Table {idx}: Header identified in row {current_row +1}: {header_cells}")
-                    
-                    # Check if 'Years ended' or similar phrases are present to handle multi-row headers
-                    if any(re.search(r'years ended|period ended|reporting period', cell.lower()) for cell in header_cells):
-                        # Assume the next row contains the actual years
-                        if current_row +1 < len(rows):
-                            next_row_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[current_row +1].find_all(['td', 'th'])]
-                            # Extract years from the next row
-                            extracted_years = extract_years_from_string(' '.join(next_row_cells))
-                            if extracted_years:
-                                column_names = extracted_years
-                                logger.debug(f"Table {idx}: Extracted column names from next row: {column_names}")
-                                current_row += 2  # Skip the next row as it's part of the header
-                            else:
-                                column_names = header_cells
-                                logger.warning(f"Table {idx}: No years found in the next row. Using header cells as column names.")
-                                current_row +=1
-                        else:
-                            column_names = header_cells
-                            current_row +=1
-                    else:
-                        column_names = header_cells
-                        current_row +=1
-                    header_found = True
-                    break
-                current_row +=1
-
-            if not header_found:
-                # Fallback: Assume the first row is the header if no header row was identified
-                header_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[0].find_all(['td', 'th'])]
-                column_names = extract_years_from_string(' '.join(header_cells))
-                if not column_names:
-                    column_names = header_cells
-                rows = rows[current_row +1:]
-                logger.warning(f"Table {idx}: No header row identified based on keywords. Using first row as header: {header_cells}")
+        # Define financial keywords for classification
+        income_keywords = ['income', 'revenue', 'net income', 'operating income']
+        balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', 'shareholders’ equity']
+        cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities', 'financing activities', 'net cash']
+        
+        # Target keywords for special debugging
+        target_keywords = ['net income', 'total assets']
+        
+        for idx, df in enumerate(tables, start=1):
+            # Clean column headers
+            df.columns = [clean_text(str(col)).lower() for col in df.columns]
+            
+            # Check if the table contains financial keywords
+            table_text = df.to_string().lower()
+            if any(keyword in table_text for keyword in income_keywords):
+                section = 'Income Statement'
+            elif any(keyword in table_text for keyword in balance_keywords):
+                section = 'Balance Sheet'
+            elif any(keyword in table_text for keyword in cash_flow_keywords):
+                section = 'Cash Flow Statement'
             else:
-                rows = rows[current_row:]
-
-            logger.debug(f"Table {idx}: Final Headers found: {column_names}")
-
-            # Debugging: Print sample tables for verification
-            if idx <= 5:  # Limit to first 5 tables for detailed logging
-                logger.debug(f"--- Table {idx} Sample ---")
-                logger.debug(f"Headers: {column_names}")
-                sample_data = []
-                # Get first 3 rows as sample
-                for sample_row in rows[:3]:
-                    sample_cells = [clean_text(cell.get_text(strip=True)) for cell in sample_row.find_all(['td', 'th'])]
-                    sample_data.append(sample_cells)
-                logger.debug(f"Sample Rows: {sample_data}")
-                logger.debug(f"--------------------------")
-
-            parsed_rows = []
-            for row_num, row in enumerate(rows, start=1):
-                cells = [clean_text(cell.get_text(strip=True)) for cell in row.find_all(['td', 'th'])]
-                
-                # Skip entirely empty rows
-                if not any(cells):
-                    logger.debug(f"Table {idx}, Row {row_num}: Empty row skipped.")
-                    continue
-                
-                row_data = parse_table_row(cells, column_names)
+                section = 'Key Financial Ratios'
+            
+            logger.info(f"Table {idx}: Classified as '{section}'")
+            
+            # Check if table contains target keywords for detailed debugging
+            if any(keyword in table_text for keyword in target_keywords):
+                logger.debug(f"Table {idx} contains target keywords '{target_keywords}'. Printing entire table for debugging.")
+                print(f"\n=== Table {idx}: {section} ===")
+                print(df.to_string(index=False))
+                print("=== End of Table ===\n")
+                logger.debug(f"Table {idx} printed for detailed debugging.")
+            
+            # Iterate over rows and parse data
+            for _, row in df.iterrows():
+                row_data = parse_table_row(row.tolist(), df.columns.tolist())
                 if row_data:
-                    parsed_rows.append(row_data)
-                else:
-                    logger.debug(f"Table {idx}, Row {row_num}: No valid data extracted.")
-
-            if parsed_rows:
-                table_text = clean_text(table.get_text()).lower()
-                if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
-                    data['income_statement'].extend(parsed_rows)
-                    logger.debug(f"Table {idx}: Classified as 'Income Statement'")
-                elif any(keyword in table_text for keyword in ['balance sheet', 'balance sheets']):
-                    data['balance_sheet'].extend(parsed_rows)
-                    logger.debug(f"Table {idx}: Classified as 'Balance Sheet'")
-                elif any(keyword in table_text for keyword in ['cash flow', 'cash flows']):
-                    data['cash_flow'].extend(parsed_rows)
-                    logger.debug(f"Table {idx}: Classified as 'Cash Flow Statement'")
-                else:
-                    data['key_ratios'].extend(parsed_rows)
-                    logger.debug(f"Table {idx}: Classified as 'Key Financial Ratios'")
-            else:
-                logger.debug(f"Table {idx}: No valid rows found for data extraction.")
+                    # Depending on section, append to appropriate list
+                    if section in ['Income Statement', 'Balance Sheet', 'Cash Flow Statement']:
+                        data[section.lower().replace(' ', '_')].append(row_data)
+                    else:
+                        data['key_ratios'].append(row_data)
         
         return data
 
