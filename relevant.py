@@ -232,7 +232,6 @@ class SECFieldExtractor:
             
             if parsed_rows:
                 table_text = clean_text(table.get_text()).lower()
-                # **Section Classification based on table headers or content**
                 if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
                     data['income_statement'].extend(parsed_rows)
                     logger.info(f"Table {idx+1}: Classified as 'Income Statement'")
