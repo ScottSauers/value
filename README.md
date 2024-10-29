@@ -145,3 +145,52 @@ PCA:
   2. Calculate factor loadings
   3. Invest in PCs via stocks by taking top k PCs and reconstructing based on weights
 Therefore, position sizing for any given stock is just equal to how much it loads across PCs.
+
+If we expect there are many stocks with similar risks and returns, this method will be approximately Markowitz-efficient.
+
+
+Alternatively, optimal portfolio weights can be determined.
+
+et R be a random vector of asset returns and w be the vector of portfolio weights. The optimization requires two key quantities:
+
+```math
+\mu_i = \text{Value Ratio}_i
+```
+```math
+\Sigma_{ij} = \frac{1}{T-1}\sum_{t=1}^T (R_{it} - \bar{R}_i)(R_{jt} - \bar{R}_j)
+```
+
+where Rit is the realized return of asset i at time t, T is the number of historical observations, and $\bar{R}_i$ is the mean historical return of asset i.
+
+Given risk-free rate $r_f$, we solve:
+
+```math
+\max_w \frac{w^T\mu - r_f}{\sqrt{w^T\Sigma w}}
+```
+
+subject to:
+```math
+\sum_{i=1}^n w_i = 1
+```
+```math
+0 \leq w_i \leq 0.20 \quad \forall i \in \{1,...,n\}
+```
+
+To generate the full efficient frontier, we instead solve:
+
+```math
+\min_w w^T\Sigma w
+```
+
+subject to:
+```math
+w^T\mu = \mu_{target}
+```
+```math
+\sum_{i=1}^n w_i = 1
+```
+```math
+0 \leq w_i \leq 0.20 \quad \forall i \in \{1,...,n\}
+```
+
+By varying $\mu_{target}$, we trace out the entire efficient frontier of portfolios that minimize variance for each level of expected return.
