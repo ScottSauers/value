@@ -1,4 +1,4 @@
-# Nano-cap Value
+# Nano-Cap Value
 
 An automated approach to identifying undervalued nano-cap stocks using SEC XBRL filings data.
 
