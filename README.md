@@ -35,6 +35,30 @@ Investors pay a premium for liquidity. Therefore, illiquid stocks may have highe
 NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + (PP\&E \times \gamma) - Total\space Liabilities
 ```
 
+### Asset Discounts
+
+Accounts Receivable (α):
+```math
+α = \frac{1}{1 + \frac{\text{Average Net Accounts Receivable}}{\text{Average Annual Revenue}}}
+```
+This measures collection efficiency. A company collecting receivables in 3 months (AR = Revenue/4) gets α = 0.8, while one taking a year gets α = 0.5. Net Accounts Receivable already incorporates management's assessment of collectibility through bad debt allowances.
+
+Inventory (β):
+```math
+β = \frac{1}{1 + \frac{\text{Average Inventory}}{\text{Average Annual Cost of Goods Sold}}}
+```
+This captures inventory liquidity through turnover. Inventory turning 4 times yearly (Inventory = COGS/4) gets β = 0.8, while turning once yearly gets β = 0.5. Faster-moving inventory commands higher recovery rates in liquidation.
+
+Property, Plant & Equipment (γ):
+```math
+γ = \frac{1}{1 + \frac{\text{Average Net PP\&E}}{\text{Average Annual Revenue}}}
+```
+This measures asset productivity - more revenue per dollar of assets indicates more marketable/valuable assets. PP&E generating its value in revenue annually (PP&E = Revenue) gets γ = 0.5, while generating 4x its value gets γ = 0.8.
+
+All three parameters must:
+- Use only universally reported financial data
+- Generate dimensionless ratios between 0 and 1
+
 ### Liabilities
 1. Current Liabilities
    - Accounts payable
