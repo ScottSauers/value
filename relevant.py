@@ -24,7 +24,7 @@ def clean_text(text: str) -> str:
 
 def extract_dates_from_headers(headers: List[str]) -> List[str]:
     """Extract dates from header cells if present."""
-    date_pattern = re.compile(r'([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})')
+    date_pattern = re.compile(r'(\d{4})')  # Simplified to extract years
     dates = []
     for header in headers:
         matches = date_pattern.findall(header)
@@ -56,12 +56,16 @@ def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, An
         if not cleaned_cell:
             continue
         # Check if the cell contains a numeric value
-        if re.search(r'\d', cleaned_cell):
+        if re.search(r'\d', cleaned_cell.replace(',', '').replace('.', '')):
             # Assign the value
             value = cleaned_cell
             # Assign the column name based on headers
             if headers and len(headers) > idx:
                 column_name = clean_text(headers[idx])
+                # Further clean column_name to extract the year if possible
+                year_match = re.search(r'(\d{4})', column_name)
+                if year_match:
+                    column_name = year_match.group(1)
             break
 
     if not value:
@@ -171,8 +175,8 @@ class SECFieldExtractor:
         tables = self.soup.find_all('table')
         logger.info(f"Found {len(tables)} tables in the document.")
         
-        # Limit detailed debugging to first 3 tables to avoid overwhelming logs
-        debug_table_limit = 3
+        # Limit detailed debugging to first 5 tables to avoid overwhelming logs
+        debug_table_limit = 5
         
         for idx, table in enumerate(tables, start=1):
             rows = table.find_all('tr')
@@ -182,35 +186,65 @@ class SECFieldExtractor:
 
             header_cells = []
             header_found = False
+            actual_header = []
+            column_names = []
 
             # Define a list of common financial header keywords
-            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date', 'balance', 'shares', 'period', 'ends']
+            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date', 'balance', 'shares', 'period', 'ends', 'consolidated', 'net', 'income', 'financial']
 
             # Iterate through the first few rows to find the header row based on keywords
             max_header_rows = 5  # Adjust as needed based on table structure
-            for i in range(min(max_header_rows, len(rows))):
-                potential_headers = [clean_text(cell.get_text(strip=True)) for cell in rows[i].find_all(['td', 'th'])]
+            current_row = 0
+            while current_row < min(max_header_rows, len(rows)):
+                potential_headers = [clean_text(cell.get_text(strip=True)) for cell in rows[current_row].find_all(['td', 'th'])]
                 
                 # Check if any of the header keywords are present in the potential headers
                 if any(any(keyword in cell.lower() for keyword in financial_header_keywords) for cell in potential_headers):
                     header_cells = potential_headers
-                    rows = rows[i+1:]  # Exclude the header row from data rows
+                    logger.info(f"Table {idx}: Header identified in row {current_row +1}: {header_cells}")
+                    
+                    # Check if 'Years ended' or similar phrases are present to handle multi-row headers
+                    if any(re.search(r'years ended|period ended|reporting period', cell.lower()) for cell in header_cells):
+                        # Assume the next row contains the actual years
+                        if current_row +1 < len(rows):
+                            next_row_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[current_row +1].find_all(['td', 'th'])]
+                            # Extract years from the next row
+                            extracted_years = extract_dates_from_headers(next_row_cells)
+                            if extracted_years:
+                                column_names = extracted_years
+                                logger.info(f"Table {idx}: Extracted column names from next row: {column_names}")
+                                current_row += 2  # Skip the next row as it's part of the header
+                            else:
+                                column_names = header_cells
+                                logger.warning(f"Table {idx}: No years found in the next row. Using header cells as column names.")
+                                current_row +=1
+                        else:
+                            column_names = header_cells
+                            current_row +=1
+                    else:
+                        column_names = header_cells
+                        current_row +=1
                     header_found = True
-                    logger.info(f"Table {idx}: Header identified in row {i+1}: {header_cells}")
                     break
+                current_row +=1
 
             if not header_found:
                 # Fallback: Assume the first row is the header if no header row was identified
                 header_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[0].find_all(['td', 'th'])]
-                rows = rows[1:]  # Exclude the first row from data rows
+                column_names = extract_dates_from_headers(header_cells)
+                if not column_names:
+                    column_names = header_cells
+                rows = rows[current_row +1:]
                 logger.warning(f"Table {idx}: No header row identified based on keywords. Using first row as header: {header_cells}")
-            
-            logger.info(f"Table {idx}: Final Headers found: {header_cells}")
-            
+            else:
+                rows = rows[current_row:]
+
+            logger.info(f"Table {idx}: Final Headers found: {column_names}")
+
             # Debugging: Print sample tables for the first few tables
             if idx <= debug_table_limit:
                 logger.debug(f"--- Table {idx} Sample ---")
-                logger.debug(f"Headers: {header_cells}")
+                logger.debug(f"Headers: {column_names}")
                 sample_data = []
                 # Get first 3 rows as sample
                 for sample_row in rows[:3]:
@@ -218,9 +252,8 @@ class SECFieldExtractor:
                     sample_data.append(sample_cells)
                 logger.debug(f"Sample Rows: {sample_data}")
                 logger.debug(f"--------------------------")
-            
+
             parsed_rows = []
-            
             for row_num, row in enumerate(rows, start=1):
                 cells = [clean_text(cell.get_text(strip=True)) for cell in row.find_all(['td', 'th'])]
                 
@@ -229,7 +262,7 @@ class SECFieldExtractor:
                     logger.debug(f"Table {idx}, Row {row_num}: Empty row skipped.")
                     continue
                 
-                row_data = parse_table_row(cells, header_cells)
+                row_data = parse_table_row(cells, column_names)
                 if row_data:
                     parsed_rows.append(row_data)
                 else:
@@ -237,7 +270,6 @@ class SECFieldExtractor:
             
             if parsed_rows:
                 table_text = clean_text(table.get_text()).lower()
-                # **Section Classification based on table headers or content**
                 if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
                     data['income_statement'].extend(parsed_rows)
                     logger.info(f"Table {idx}: Classified as 'Income Statement'")
@@ -250,8 +282,8 @@ class SECFieldExtractor:
                 else:
                     data['key_ratios'].extend(parsed_rows)
                     logger.info(f"Table {idx}: Classified as 'Key Financial Ratios'")
-        
-        all_text = clean_text(self.soup.get_text()).lower()
+            else:
+                logger.debug(f"Table {idx}: No valid rows found for data extraction.")
         
         return data
 
