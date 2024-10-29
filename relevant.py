@@ -161,20 +161,38 @@ class SECFieldExtractor:
                 continue
     
             header_cells = []
-            if len(rows) > 0:
-                header_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[0].find_all(['td', 'th'])]
-                rows = rows[1:]  # Exclude the header row from data rows
-                logger.info(f"Table {idx+1}: Headers found: {header_cells}")
-            else:
-                logger.warning(f"Table {idx+1}: No rows to process.")
-                continue
+            header_found = False
     
+            # Define a list of common financial header keywords
+            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date']
+    
+            # Iterate through the first few rows to find the header row based on keywords
+            max_header_rows = 5  # Adjust as needed based on table structure
+            for i in range(min(max_header_rows, len(rows))):
+                potential_headers = [clean_text(cell.get_text(strip=True)) for cell in rows[i].find_all(['td', 'th'])]
+                
+                # Check if any of the header keywords are present in the potential headers
+                if any(any(keyword in cell.lower() for keyword in financial_header_keywords) for cell in potential_headers):
+                    header_cells = potential_headers
+                    rows = rows[i+1:]  # Exclude the header row from data rows
+                    header_found = True
+                    logger.info(f"Table {idx+1}: Header identified in row {i+1}: {header_cells}")
+                    break
+            
+            if not header_found:
+                # Fallback: Assume the first row is the header if no header row was identified
+                header_cells = [clean_text(cell.get_text(strip=True)) for cell in rows[0].find_all(['td', 'th'])]
+                rows = rows[1:]  # Exclude the first row from data rows
+                logger.warning(f"Table {idx+1}: No header row identified based on keywords. Using first row as header: {header_cells}")
+            
+            logger.info(f"Table {idx+1}: Final Headers found: {header_cells}")
+            
             parsed_rows = []
             
             for row_num, row in enumerate(rows, start=2):  # Start counting from 2 considering header
                 cells = [clean_text(cell.get_text(strip=True)) for cell in row.find_all(['td', 'th'])]
                 
-                # Skip empty rows
+                # Skip entirely empty rows
                 if not any(cells):
                     logger.debug(f"Table {idx+1}, Row {row_num}: Empty row skipped.")
                     continue
@@ -187,6 +205,7 @@ class SECFieldExtractor:
             
             if parsed_rows:
                 table_text = clean_text(table.get_text()).lower()
+                # **Section Classification based on table headers**
                 if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
                     data['income_statement'].extend(parsed_rows)
                     logger.info(f"Table {idx+1}: Classified as 'Income Statement'")
@@ -203,6 +222,7 @@ class SECFieldExtractor:
         all_text = clean_text(self.soup.get_text()).lower()
         
         return data
+
 
 def main():
     if len(sys.argv) != 4:
