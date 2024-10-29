@@ -12,7 +12,7 @@ The fundamental value of a business consists of two components:
 
 Investors pay a premium for liquidity. Therefore, illiquid stocks may have higher value. Also, small market cap stocks may not be worth it for larger players, so there may be more inefficiencies left unexploited. As the market recognizes the true value of the company, the stock trend towards fair value.
 
-## 1. Asset Value Calculation
+## Asset Value Calculation
 
 ### Components
 - Cash and Cash Equivalents (100% of value)
@@ -74,7 +74,7 @@ All three parameters must:
    - Pension obligations
    - Deferred tax liabilities
 
-## 2. Operating Value Calculation
+## Operating Value Calculation
 
 ### Free Cash Flow Calculation
 
@@ -151,6 +151,8 @@ NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + (PP\&E \
 \text{Present Value of FCF} = \sum_{t=1}^{n} \frac{FCF_t}{(1 + r)^t}
 ```
 
+## Portfolio Construction
+
 #### Primary Screens
 
 1. Market Cap Screen
@@ -160,9 +162,9 @@ NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + (PP\&E \
    - Calculate Value Ratio (average over some time period)
    - Flag companies trading below some multiple of Total Value
 
-Take the top % of best valued stocks, use for portfolio construction.
+Take the top % of best valued stocks, use for portfolio construction. Keep this percentage liberal since the portfolio will be optimized for more efficient return later.
 
-### Portfolio Construction
+### Portfolio Weights
 
 To construct an optimal portfolio, we need to generate the efficient frontier - the set of portfolios that give the highest expected return for each level of risk. First, we define our inputs:
 
