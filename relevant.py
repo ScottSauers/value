@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import logging
 import re
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,15 @@ def clean_text(text: str) -> str:
     """Clean text by removing extra whitespace and special characters."""
     return ' '.join(text.split()).strip()
 
+def extract_dates_from_headers(headers: List[str]) -> Optional[str]:
+    """Extract date from headers if present."""
+    date_pattern = re.compile(r'([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})')
+    for header in headers:
+        match = date_pattern.search(header)
+        if match:
+            return match.group(1)
+    return None
+
 def parse_table_row(row: List[str], headers: List[str] = None) -> Optional[Dict[str, Any]]:
     """
     Parse a table row into a meaningful key-value pair if possible.
@@ -30,30 +40,36 @@ def parse_table_row(row: List[str], headers: List[str] = None) -> Optional[Dict[
     """
     if len(row) < 2 or not headers:
         return None
-    
+
     label = clean_text(row[0]).lower()
     if not label:
         return None
-    
+
     value = None
     column_name = 'N/A'
-    
-    # First numeric cell after the label is the value
+
+    # Iterate through the cells to find the first numeric value
     for idx, cell in enumerate(row[1:], start=1):  # Start from index 1
         cleaned_cell = clean_text(cell)
-        if cleaned_cell and any(c.isdigit() for c in cleaned_cell):
+        # Skip if cell is empty
+        if not cleaned_cell:
+            continue
+        # Check if the cell contains a numeric value
+        if re.search(r'\d', cleaned_cell):
+            # Assign the value
             value = cleaned_cell
+            # Assign the column name based on headers
             if headers and len(headers) > idx:
                 column_name = clean_text(headers[idx])
             break
-    
+
     if not value:
         return None
-    
+
     return {
         'label': label,
         'value': value,
-        'column_name': column_name
+        'column_name': column_name if column_name else 'N/A'
     }
 
 def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
@@ -81,7 +97,6 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
             for item in items:
                 column_name = item.get('column_name', 'N/A')
                 f.write(f"{item['label']}\t{item['value']}\t{column_name}\t{section_name}\n")
-
 
 class SECFieldExtractor:
     def __init__(self, company_name: str, email: str):
@@ -125,6 +140,7 @@ class SECFieldExtractor:
             html = self.downloader.download_filing(url=metadata.primary_doc_url).decode()
             
             if not html:
+                logger.error("Downloaded HTML content is empty.")
                 return None
                 
             self.soup = BeautifulSoup(html, 'html.parser')
@@ -154,19 +170,22 @@ class SECFieldExtractor:
         tables = self.soup.find_all('table')
         logger.info(f"Found {len(tables)} tables in the document.")
         
+        # Limit detailed debugging to first 3 tables
+        debug_table_limit = 3
+        
         for idx, table in enumerate(tables):
             rows = table.find_all('tr')
             if not rows:
                 logger.debug(f"Table {idx+1}: No rows found.")
                 continue
-    
+
             header_cells = []
             header_found = False
-    
+
             # Define a list of common financial header keywords
-            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date']
-    
-            # Iterate through the first few rows to find the header row based on keywords
+            financial_header_keywords = ['year', 'amount', 'total', 'value', 'usd', 'description', 'item', 'date', 'balance', 'shares']
+
+            # Attempt to identify header row based on keywords
             max_header_rows = 5  # Adjust as needed based on table structure
             for i in range(min(max_header_rows, len(rows))):
                 potential_headers = [clean_text(cell.get_text(strip=True)) for cell in rows[i].find_all(['td', 'th'])]
@@ -187,9 +206,17 @@ class SECFieldExtractor:
             
             logger.info(f"Table {idx+1}: Final Headers found: {header_cells}")
             
+            # Debugging: Print sample tables
+            if idx < debug_table_limit:
+                logger.debug(f"--- Table {idx+1} Sample ---")
+                logger.debug(f"Headers: {header_cells}")
+                sample_rows = [clean_text(cell.get_text(strip=True)) for cell in rows[:3].find_all(['td', 'th'])]
+                logger.debug(f"Sample Rows: {sample_rows}")
+                logger.debug(f"--------------------------")
+            
             parsed_rows = []
             
-            for row_num, row in enumerate(rows, start=2):  # Start counting from 2 considering header
+            for row_num, row in enumerate(rows, start=1):
                 cells = [clean_text(cell.get_text(strip=True)) for cell in row.find_all(['td', 'th'])]
                 
                 # Skip entirely empty rows
@@ -205,14 +232,14 @@ class SECFieldExtractor:
             
             if parsed_rows:
                 table_text = clean_text(table.get_text()).lower()
-                # **Section Classification based on table headers**
+                # **Section Classification based on table headers or content**
                 if any(keyword in table_text for keyword in ['income statement', 'statement of operations', 'comprehensive income']):
                     data['income_statement'].extend(parsed_rows)
                     logger.info(f"Table {idx+1}: Classified as 'Income Statement'")
-                elif 'balance sheet' in table_text:
+                elif any(keyword in table_text for keyword in ['balance sheet', 'balance sheets']):
                     data['balance_sheet'].extend(parsed_rows)
                     logger.info(f"Table {idx+1}: Classified as 'Balance Sheet'")
-                elif 'cash flow' in table_text:
+                elif any(keyword in table_text for keyword in ['cash flow', 'cash flows']):
                     data['cash_flow'].extend(parsed_rows)
                     logger.info(f"Table {idx+1}: Classified as 'Cash Flow Statement'")
                 else:
@@ -222,7 +249,6 @@ class SECFieldExtractor:
         all_text = clean_text(self.soup.get_text()).lower()
         
         return data
-
 
 def main():
     if len(sys.argv) != 4:
