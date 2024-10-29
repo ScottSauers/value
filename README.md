@@ -140,57 +140,50 @@ Take the top % of best valued stocks, use for portfolio construction.
 
 ### Portfolio Construction
 
-PCA:
-  1. Get matrix of returns across time using daily or weekly data
-  2. Calculate factor loadings
-  3. Invest in PCs via stocks by taking top k PCs and reconstructing based on weights
-Therefore, position sizing for any given stock is just equal to how much it loads across PCs.
+To construct an optimal portfolio, we need to generate the efficient frontier - the set of portfolios that give the highest expected return for each level of risk. First, we define our inputs:
 
-If we expect there are many stocks with similar risks and returns, this method will be approximately Markowitz-efficient.
-
-
-Alternatively, optimal portfolio weights can be determined.
-
-Let R be a random vector of asset returns and w be the vector of portfolio weights. The optimization requires two key quantities:
+Let $w$ be our vector of portfolio weights (what we're solving for). We need two key quantities:
 
 ```math
-\mu_i = \text{Value Ratio}_i
+\mu_i = \text{Value Ratio}_i \quad \text{(expected return for stock i)}
 ```
+
 ```math
-\Sigma_{ij} = \frac{1}{T-1}\sum_{t=1}^T (R_{it} - \bar{R}_i)(R_{jt} - \bar{R}_j)
+\Sigma_{ij} = \frac{1}{T-1}\sum_{t=1}^T (R_{it} - \bar{R}_i)(R_{jt} - \bar{R}_j) \quad \text{(covariance between stocks i and j)}
 ```
 
 where $R_{it}$ is the realized return of asset $i$ at time $t$, $T$ is the number of historical observations, and $\bar{R}_i$ is the mean historical return of asset $i$.
 
-Given risk-free rate $r_f$, we solve:
+To generate the efficient frontier, we solve:
 
 ```math
-\max_w \frac{w^T\mu - r_f}{\sqrt{w^T\Sigma w}}
-```
-
-subject to:
-```math
-\sum_{i=1}^n w_i = 1
-```
-```math
-0 \leq w_i \leq 0.20 \quad \forall i \in \{1,...,n\}
-```
-
-To generate the full efficient frontier, we instead solve:
-
-```math
-\min_w w^T\Sigma w
+\min_w w^T\Sigma w \quad \text{(minimize portfolio variance)}
 ```
 
 subject to:
 ```math
-w^T\mu = \mu_{target}
+w^T\mu = \mu_{\text{target}} \quad \text{(achieve target return)}
 ```
 ```math
-\sum_{i=1}^n w_i = 1
+\sum_{i=1}^n w_i = 1 \quad \text{(fully invested)}
 ```
 ```math
-0 \leq w_i \leq 0.20 \quad \forall i \in \{1,...,n\}
+0 \leq w_i \leq 0.20 \quad \text{(position limits)}
 ```
 
-By varying $\mu_{target}$, we trace out the entire efficient frontier of portfolios that minimize variance for each level of expected return.
+By solving this for different values of $\mu_{\text{target}}$, we generate the efficient frontier. Each point on the frontier represents a portfolio with minimum variance for its target return level.
+
+To choose our position on the frontier:
+
+To choose our position on the frontier:
+
+Choose your desired annual return $y$ above the opportunity cost rate $r$. Given an expected time to fair value of $b$ years, set:
+
+```math
+\mu_{\text{target}} = (1 + y)^b
+```
+
+For example:
+- For 20% annual return with 3-year convergence: $\mu_{\text{target}} = (1 + 0.20)^3
+
+The higher the target return $y$ or longer the convergence time $b$, the higher the required $\mu_{\text{target}}$ and corresponding portfolio variance.
