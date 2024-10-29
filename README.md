@@ -175,9 +175,7 @@ By solving this for different values of $\mu_{\text{target}}$, we generate the e
 
 To choose our position on the frontier:
 
-To choose our position on the frontier:
-
-Choose your desired annual return $y$ above the opportunity cost rate $r$. Given an expected time to fair value of $b$ years, set:
+To choose the position on the frontier, choose your desired annual return $y$ above the opportunity cost rate $r$. Given an expected time to fair value of $b$ years, set:
 
 ```math
 \mu_{\text{target}} = (1 + y)^b
