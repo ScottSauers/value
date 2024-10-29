@@ -6,9 +6,10 @@ from bs4 import BeautifulSoup
 from dataclasses import dataclass
 import logging
 import re
+import pandas as pd
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)  # Set to DEBUG for more detailed logs
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -26,26 +27,47 @@ def extract_years_from_string(s: str) -> List[str]:
     """Extract four-digit years from a string."""
     return re.findall(r'(?:19|20)\d{2}', s)
 
-def parse_table_row(row: List[str], headers: List[str]) -> Optional[List[Dict[str, Any]]]:
+def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, Any]]:
     """
-    Parse a table row into a list of dictionaries mapping headers to cell values.
+    Parse a table row into a key-value pair if possible.
     Args:
         row: The data row
         headers: The header row cells
     """
-    if not headers or not row or len(row) != len(headers):
+    if not headers or not row or len(row) < 2:
         return None
 
-    row_data = []
-    for header, cell in zip(headers, row):
-        header_clean = clean_text(header).lower()
-        cell_clean = clean_text(cell)
-        if header_clean and cell_clean:
-            row_data.append({
-                'label': header_clean,
-                'value': cell_clean
-            })
-    return row_data if row_data else None
+    label = clean_text(row[0]).lower()
+    if not label:
+        return None
+
+    # Find the first numeric value in the row
+    value = None
+    column_name = 'N/A'
+    for idx, cell in enumerate(row[1:], start=1):
+        cleaned_cell = clean_text(cell)
+        if not cleaned_cell:
+            continue
+        # Check if the cell contains a numeric value
+        if re.search(r'\d', cleaned_cell.replace(',', '').replace('.', '').replace('(', '').replace(')', '')):
+            value = cleaned_cell
+            # Assign the column name based on headers
+            if headers and len(headers) > idx:
+                column_name = clean_text(headers[idx])
+                # Extract year if present
+                years = extract_years_from_string(column_name)
+                if years:
+                    column_name = ','.join(years)
+            break
+
+    if not value:
+        return None
+
+    return {
+        'label': label,
+        'value': value,
+        'column_name': column_name if column_name else 'N/A'
+    }
 
 def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     """Save fields to a TSV file."""
@@ -58,11 +80,17 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
         f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\n")
         f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\n")
         
-        sections = ['income_statement', 'balance_sheet', 'cash_flow']
-        for section in sections:
-            items = data.get(section, [])
+        sections = {
+            'Income Statement': data.get('income_statement', []),
+            'Balance Sheet': data.get('balance_sheet', []),
+            'Cash Flow Statement': data.get('cash_flow', []),
+            'Key Financial Ratios': data.get('key_ratios', [])
+        }
+        
+        for section_name, items in sections.items():
             for item in items:
-                f.write(f"{item['label']}\t{item['value']}\t{item.get('column_name', 'N/A')}\t{section.replace('_', ' ').title()}\n")
+                column_name = item.get('column_name', 'N/A')
+                f.write(f"{item['label']}\t{item['value']}\t{column_name}\t{section_name}\n")
 
 class SECFieldExtractor:
     def __init__(self, company_name: str, email: str):
@@ -125,78 +153,46 @@ class SECFieldExtractor:
         data = {
             'income_statement': [],
             'balance_sheet': [],
-            'cash_flow': []
+            'cash_flow': [],
+            'key_ratios': []
         }
         
-        tables = self.soup.find_all('table')
+        # Use pandas to read all tables
+        tables = pd.read_html(str(self.soup), header=0, flavor='bs4')
         logger.info(f"Found {len(tables)} tables in the document.")
-
-        for idx, table in enumerate(tables, start=1):
-            table_text = clean_text(table.get_text()).lower()
-
-            # Skip tables that are unlikely to contain financial data
-            if any(keyword in table_text for keyword in ['index', 'table of contents', 'signature', 'exhibit']):
-                logger.debug(f"Table {idx}: Skipped due to irrelevant content.")
-                continue
-
-            rows = table.find_all('tr')
-            if not rows:
-                logger.debug(f"Table {idx}: No rows found.")
-                continue
-
-            # Attempt to identify headers
-            headers = []
-            header_row_index = None
-            for i, row in enumerate(rows[:5]):  # Check first 5 rows for headers
-                cells = row.find_all(['th', 'td'])
-                cell_texts = [clean_text(cell.get_text()) for cell in cells]
-                if any('year' in cell.lower() or 'ended' in cell.lower() for cell in cell_texts):
-                    headers = cell_texts
-                    header_row_index = i
-                    break
-
-            if not headers:
-                logger.debug(f"Table {idx}: No headers found, skipping table.")
-                continue
-
-            # Check if headers contain financial keywords
-            financial_keywords = ['net income', 'revenue', 'assets', 'liabilities', 'equity', 'cash', 'operating activities', 'investing activities', 'financing activities']
-            if not any(any(keyword in header.lower() for keyword in financial_keywords) for header in headers):
-                logger.debug(f"Table {idx}: Headers do not contain financial keywords, skipping table.")
-                continue
-
-            logger.info(f"Table {idx}: Processing with headers: {headers}")
-
-            # Extract data rows
-            data_rows = rows[header_row_index + 1:]
-            for row in data_rows:
-                cells = row.find_all(['td', 'th'])
-                cell_texts = [clean_text(cell.get_text()) for cell in cells]
-
-                # Skip empty rows
-                if not any(cell_texts):
-                    continue
-
-                # Adjust row if number of cells doesn't match headers
-                if len(cell_texts) < len(headers):
-                    # Pad the row with empty strings
-                    cell_texts.extend([''] * (len(headers) - len(cell_texts)))
-                elif len(cell_texts) > len(headers):
-                    # Trim the row to match the headers
-                    cell_texts = cell_texts[:len(headers)]
-
-                parsed_row = parse_table_row(cell_texts, headers)
-                if not parsed_row:
-                    continue
-
-                # Classify and store the data
-                if any('income' in header.lower() for header in headers):
-                    data['income_statement'].extend(parsed_row)
-                elif any('asset' in header.lower() or 'liabilit' in header.lower() or 'equity' in header.lower() for header in headers):
-                    data['balance_sheet'].extend(parsed_row)
-                elif any('cash' in header.lower() for header in headers):
-                    data['cash_flow'].extend(parsed_row)
-
+        
+        # Define financial keywords for classification
+        income_keywords = ['income', 'revenue', 'net income', 'operating income']
+        balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', 'shareholders’ equity']
+        cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities', 'financing activities', 'net cash']
+        
+        for idx, df in enumerate(tables, start=1):
+            # Clean column headers
+            df.columns = [clean_text(str(col)).lower() for col in df.columns]
+            
+            # Check if the table contains financial keywords
+            table_text = df.to_string().lower()
+            if any(keyword in table_text for keyword in income_keywords):
+                section = 'Income Statement'
+            elif any(keyword in table_text for keyword in balance_keywords):
+                section = 'Balance Sheet'
+            elif any(keyword in table_text for keyword in cash_flow_keywords):
+                section = 'Cash Flow Statement'
+            else:
+                section = 'Key Financial Ratios'
+            
+            logger.info(f"Table {idx}: Classified as '{section}'")
+            
+            # Iterate over rows and parse data
+            for _, row in df.iterrows():
+                row_data = parse_table_row(row.tolist(), df.columns.tolist())
+                if row_data:
+                    # Depending on section, append to appropriate list
+                    if section in ['Income Statement', 'Balance Sheet', 'Cash Flow Statement']:
+                        data[section.lower().replace(' ', '_')].append(row_data)
+                    else:
+                        data['key_ratios'].append(row_data)
+        
         return data
 
 def main():
