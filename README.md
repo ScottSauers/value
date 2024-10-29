@@ -184,6 +184,6 @@ Choose your desired annual return $y$ above the opportunity cost rate $r$. Given
 ```
 
 For example:
-- For 20% annual return with 3-year convergence: $\mu_{\text{target}} = (1 + 0.20)^3
+- For 20% annual return with 3-year convergence: $\mu_{\text{target}}$ = (1 + 0.20)^3
 
 The higher the target return $y$ or longer the convergence time $b$, the higher the required $\mu_{\text{target}}$ and corresponding portfolio variance.
