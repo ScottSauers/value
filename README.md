@@ -160,7 +160,7 @@ et R be a random vector of asset returns and w be the vector of portfolio weight
 \Sigma_{ij} = \frac{1}{T-1}\sum_{t=1}^T (R_{it} - \bar{R}_i)(R_{jt} - \bar{R}_j)
 ```
 
-where Rit is the realized return of asset i at time t, T is the number of historical observations, and $\bar{R}_i$ is the mean historical return of asset i.
+where $R_{it}$ is the realized return of asset $i$ at time $t$, $T$ is the number of historical observations, and $\bar{R}_i$ is the mean historical return of asset $i$.
 
 Given risk-free rate $r_f$, we solve:
 
