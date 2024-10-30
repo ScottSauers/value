@@ -8,6 +8,11 @@ import logging
 import re
 import pandas as pd
 from io import StringIO
+import warnings
+from bs4 import XMLParsedAsHTMLWarning
+
+# Suppress XMLParsedAsHTMLWarning
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -23,10 +28,8 @@ class CompanyInfo:
 def clean_text(text: Any) -> str:
     """Clean text by removing extra whitespace and special characters."""
     # Convert non-string types to string, then clean
-    if not isinstance(text, str):
-        text = str(text)
+    text = str(text) if not isinstance(text, str) else text
     return ' '.join(text.split()).strip()
-
 
 def extract_years_from_string(s: str) -> List[str]:
     """Extract four-digit years from a string."""
@@ -34,87 +37,98 @@ def extract_years_from_string(s: str) -> List[str]:
 
 def preprocess_table(df):
     """Preprocess table to handle complex headers and clean data."""
-    # Drop completely empty rows and columns
-    df = df.dropna(how='all').dropna(axis=1, how='all')
-    
-    # Define additional keywords to identify header rows
-    header_keywords = ['Year', 'Month', 'Period', 'Date', 'Fiscal', 'Quarter', 'Type']
-    
-    # Initialize headers list
-    headers = []
-    
-    # Iterate through the first 5 rows to find header rows
-    for i in range(min(5, len(df))):
-        row = df.iloc[i]
-        if row.astype(str).str.contains('|'.join(header_keywords), case=False, regex=True).any():
-            headers.append(row)
-    
-    if headers:
-        # Combine headers vertically
-        header = pd.concat(headers).fillna('')
-        # Create meaningful column names using clean_text to ensure strings
-        columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
+    try:
+        # Drop completely empty rows and columns
+        df = df.dropna(how='all').dropna(axis=1, how='all')
         
-        # Check if header length matches df columns
-        if len(columns) == len(df.columns):
-            df.columns = columns  # Set new headers if they match
-            df = df.iloc[len(headers):]  # Drop header rows
+        # Define additional keywords to identify header rows
+        header_keywords = ['Year', 'Month', 'Period', 'Date', 'Fiscal', 'Quarter', 'Type']
+        
+        # Initialize headers list
+        headers = []
+        
+        # Iterate through the first 5 rows to find header rows
+        for i in range(min(5, len(df))):
+            row = df.iloc[i]
+            if row.astype(str).str.contains('|'.join(header_keywords), case=False, regex=True).any():
+                headers.append(row)
+        
+        if headers:
+            # Combine headers vertically
+            header = pd.concat(headers).fillna('')
+            # Create meaningful column names using clean_text to ensure strings
+            columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
+            
+            # Check if header length matches df columns
+            if len(columns) == len(df.columns):
+                df.columns = columns  # Set new headers if they match
+                df = df.iloc[len(headers):]  # Drop header rows
+            else:
+                # Fallback: Set default column names if there's a mismatch
+                df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
         else:
-            # Fallback: Set default column names if there's a mismatch
+            # If no headers detected, assign default column names
             df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
-    else:
-        # If no headers detected, assign default column names
-        df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
-    
-    # Clean column names
-    df.columns = [clean_text(str(col)).lower() for col in df.columns]
-    
-    # Reset index after dropping rows
-    df = df.reset_index(drop=True)
-    
-    return df
+        
+        # Clean column names
+        df.columns = [clean_text(str(col)).lower() for col in df.columns]
+        
+        # Reset index after dropping rows
+        df = df.reset_index(drop=True)
+        
+        # Log the final column names for verification
+        logger.debug(f"Processed columns: {df.columns.tolist()}")
+        
+        return df
+    except Exception as e:
+        logger.error(f"Exception in preprocess_table: {e}")
+        raise
 
 def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, Any]]:
     """Parse a table row with improved header handling."""
-    if not headers or not row or len(row) < 2:
-        return None
+    try:
+        if not headers or not row or len(row) < 2:
+            return None
 
-    # Get the label from the first column
-    label = clean_text(str(row[0])).lower()
-    if not label or label in ['nan', 'none', '']:
-        return None
+        # Get the label from the first column
+        label = clean_text(str(row[0])).lower()
+        if not label or label in ['nan', 'none', '']:
+            return None
 
-    # Look for value and corresponding header
-    value = None
-    column_name = None
-    
-    # Iterate through cells to find the first valid numeric value
-    for i, cell in enumerate(row[1:], start=1):
-        cell_str = str(cell)
-        # Clean the cell value
-        cleaned_cell = clean_text(cell_str)
+        # Look for value and corresponding header
+        value = None
+        column_name = None
         
-        # Skip empty cells
-        if not cleaned_cell or cleaned_cell.lower() in ['nan', 'none']:
-            continue
+        # Iterate through cells to find the first valid numeric value
+        for i, cell in enumerate(row[1:], start=1):
+            cell_str = str(cell)
+            # Clean the cell value
+            cleaned_cell = clean_text(cell_str)
             
-        # Check if the cell contains a numeric value or parenthesized number
-        numeric_pattern = r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$'
-        if re.match(numeric_pattern, cleaned_cell.replace(' ', '')):
-            value = cleaned_cell
-            # Get corresponding header if available
-            if i < len(headers):
-                column_name = clean_text(str(headers[i]))
-            break
+            # Skip empty cells
+            if not cleaned_cell or cleaned_cell.lower() in ['nan', 'none']:
+                continue
+                
+            # Check if the cell contains a numeric value or parenthesized number
+            numeric_pattern = r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$'
+            if re.match(numeric_pattern, cleaned_cell.replace(' ', '')):
+                value = cleaned_cell
+                # Get corresponding header if available
+                if i < len(headers):
+                    column_name = clean_text(str(headers[i]))
+                break
 
-    if not value:
+        if not value:
+            return None
+
+        return {
+            'label': label,
+            'value': value,
+            'column_name': column_name if column_name else 'N/A'
+        }
+    except Exception as e:
+        logger.error(f"Exception in parse_table_row: {e} | Row: {row} | Headers: {headers}")
         return None
-
-    return {
-        'label': label,
-        'value': value,
-        'column_name': column_name if column_name else 'N/A'
-    }
 
 def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     """Save fields to a TSV file."""
@@ -190,8 +204,7 @@ class SECFieldExtractor:
                 logger.error("Downloaded HTML content is empty.")
                 return None
                 
-            # Use 'xml' parser if applicable, else 'lxml'
-            # To suppress the XMLParsedAsHTMLWarning, you can handle it appropriately
+            # Use 'lxml' parser for better handling and suppress XMLParsedAsHTMLWarning
             self.soup = BeautifulSoup(html_content, 'lxml')  # or 'xml' if appropriate
             financial_data = self.extract_financial_data()
             financial_data['company_info'] = {
@@ -230,13 +243,16 @@ class SECFieldExtractor:
                 # Apply preprocessing to clean and structure the table
                 df = preprocess_table(df)
                 
+                # Log the DataFrame shape and columns for debugging
+                logger.debug(f"Table {idx} shape: {df.shape} | Columns: {df.columns.tolist()}")
+                
                 # Identify the table type based on content
                 table_text = df.to_string().lower()
 
                 income_keywords = ['income', 'revenue', 'net income', 'operating income']
-                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', 'shareholders’ equity']
+                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', 'shareholders’ equity', 'shareholders\' equity']
                 cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities', 'financing activities', 'net cash']
-                
+
                 if any(keyword in table_text for keyword in income_keywords):
                     section = 'Income Statement'
                 elif any(keyword in table_text for keyword in balance_keywords):
@@ -249,7 +265,7 @@ class SECFieldExtractor:
                 logger.info(f"Table {idx}: Classified as '{section}'")
                 
                 # Improved row parsing with header context
-                for idx, row in df.iterrows():
+                for row_idx, row in df.iterrows():
                     # Skip rows that are likely sub-headers
                     if row.astype(str).str.contains('Year|Month|Period|Date', case=False).any():
                         continue
