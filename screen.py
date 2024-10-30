@@ -99,40 +99,42 @@ class MarketCapScreener:
             latest_price = price_data['close'].iloc[-1]
             print(f"Latest price for {ticker}: {latest_price}")
     
-            # Create YFinance Ticker object with proper session
-            yf.pdr_override()  # Override pandas datareader
-            time.sleep(0.1)  # Rate limiting
-            
             try:
+                # Create ticker object and get fast_info first
                 ticker_obj = yf.Ticker(ticker)
-                # Force info to load by accessing a property
-                print(f"Attempting to get info for {ticker}...")
-                info = ticker_obj.basic_info  # Use basic_info instead of info
-                print(f"Got info for {ticker}")
-    
-                # Method 1: Try to get market cap directly
+                fast_info = ticker_obj.fast_info
+                
+                # Get market cap from different methods
                 market_cap = None
-                if hasattr(ticker_obj, 'info') and 'marketCap' in ticker_obj.info:
-                    market_cap = ticker_obj.info['marketCap']
-                    print(f"{ticker} Market Cap from info: {market_cap}")
-                
-                # Method 2: Try to get from fast info
-                if market_cap is None:
-                    fast_info = ticker_obj.fast_info
-                    if hasattr(fast_info, 'market_cap'):
-                        market_cap = fast_info.market_cap
-                        print(f"{ticker} Market Cap from fast_info: {market_cap}")
-                
-                # Method 3: Calculate from shares if needed
                 shares_outstanding = None
-                if market_cap is None and hasattr(ticker_obj, 'info'):
-                    info = ticker_obj.info
-                    if 'sharesOutstanding' in info:
-                        shares_outstanding = info['sharesOutstanding']
-                        market_cap = shares_outstanding * latest_price
-                        print(f"{ticker} Market Cap calculated: {market_cap}")
+                
+                # Method 1: Try fast_info market cap
+                if hasattr(fast_info, 'market_cap'):
+                    market_cap = fast_info.market_cap 
+                    print(f"{ticker} Market Cap from fast_info: {market_cap}")
+                
+                # Method 2: Try shares * price if available
+                if market_cap is None and hasattr(fast_info, 'shares_outstanding'):
+                    shares_outstanding = fast_info.shares_outstanding
+                    market_cap = shares_outstanding * latest_price
+                    print(f"{ticker} Market Cap calculated: {market_cap}")
+                
+                # Method 3: Try to get from regular info as last resort
+                if market_cap is None:
+                    try:
+                        time.sleep(0.1)  # Rate limit
+                        info = ticker_obj.get_info()  # Use get_info() instead of .info
+                        if 'marketCap' in info:
+                            market_cap = info['marketCap']
+                            print(f"{ticker} Market Cap from info: {market_cap}")
+                        elif 'sharesOutstanding' in info:
+                            shares_outstanding = info['sharesOutstanding']
+                            market_cap = shares_outstanding * latest_price
+                            print(f"{ticker} Market Cap from shares: {market_cap}")
+                    except Exception as e:
+                        print(f"Could not get detailed info for {ticker}: {str(e)}")
     
-                # Final check
+                # Final check and data return
                 if market_cap is None or market_cap <= 0:
                     print(f"No valid market cap data for {ticker}")
                     return None
@@ -149,7 +151,7 @@ class MarketCapScreener:
                 }
     
             except Exception as e:
-                print(f"YFinance error for {ticker}: {str(e)}")
+                print(f"Error getting market cap for {ticker}: {str(e)}")
                 return None
     
         except Exception as e:
