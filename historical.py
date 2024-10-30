@@ -97,72 +97,91 @@ class HistoricalDataProcessor:
 
     def _harmonize_dates(self, dfs: List[pd.DataFrame], interval: str) -> pd.DataFrame:
         """
-        Harmonize dates across multiple dataframes with a more flexible approach.
-        Now keeps all dates and fills missing data with NaN.
+        Optimized date harmonization that processes data in chunks and avoids 
+        creating full date-ticker cartesian product.
         """
         self.logger.info(f"Harmonizing {len(dfs)} dataframes for {interval} interval")
         
-        # Convert all date columns to datetime
-        for df in dfs:
-            if 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
+        # Process in chunks to avoid memory issues
+        chunk_size = 50
+        result_chunks = []
+        total_chunks = (len(dfs) + chunk_size - 1) // chunk_size
         
-        # Get all unique dates
-        all_dates = sorted(set().union(*[set(df['date'].unique()) for df in dfs]))
-        self.logger.info(f"Date range: {min(all_dates)} to {max(all_dates)}")
+        for chunk_idx in range(0, len(dfs), chunk_size):
+            chunk_dfs = dfs[chunk_idx:chunk_idx + chunk_size]
+            self.logger.info(f"Processing chunk {(chunk_idx//chunk_size)+1}/{total_chunks} ({len(chunk_dfs)} stocks)")
+            
+            # Convert dates and process chunk
+            for df in chunk_dfs:
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+            
+            # Merge dataframes in chunk using concat (more efficient than creating full grid)
+            chunk_result = pd.concat(chunk_dfs, axis=0)
+            chunk_result = chunk_result.sort_values(['date', 'ticker'])
+            result_chunks.append(chunk_result)
+            
+            # Log progress
+            processed_stocks = min(chunk_idx + chunk_size, len(dfs))
+            self.logger.info(f"Processed {processed_stocks}/{len(dfs)} stocks")
         
-        # Create a multi-index with all combinations of dates and tickers
-        tickers = [df['ticker'].iloc[0] for df in dfs]  # Assuming each df has one ticker
-        multi_index = pd.MultiIndex.from_product([all_dates, tickers], names=['date', 'ticker'])
+        # Combine all chunks
+        self.logger.info("Combining all chunks...")
+        final_result = pd.concat(result_chunks, axis=0)
         
-        # Initialize empty dataframe with all date-ticker combinations
-        columns = ['open', 'high', 'low', 'close', 'volume']
-        result = pd.DataFrame(index=multi_index, columns=columns)
+        # Get overall date range for logging
+        date_range = f"{final_result['date'].min()} to {final_result['date'].max()}"
+        self.logger.info(f"Date range: {date_range}")
         
-        # Fill in data from each dataframe
-        for df in dfs:
-            ticker = df['ticker'].iloc[0]
-            df_indexed = df.set_index(['date', 'ticker'])
-            result.loc[pd.IndexSlice[:, ticker], :] = df_indexed[columns]
+        # Final sort
+        final_result = final_result.sort_values(['date', 'ticker'])
         
-        # Reset index and sort
-        result = result.reset_index()
-        result = result.sort_values(['date', 'ticker'])
-        
-        self.logger.info(f"Final harmonized shape: {result.shape}")
-        return result
+        self.logger.info(f"Final harmonized shape: {final_result.shape}")
+        return final_result
 
     def combine_price_files(self, interval: str) -> str:
-        """Combine all price files for a given interval into one harmonized file."""
+        """Processes data in chunks."""
         pattern = f"*_prices_{interval}_*.tsv"
         price_files = list(self.data_dir.glob(pattern))
         
         if not price_files:
             self.logger.warning(f"No price files found for interval {interval}")
             return None
-            
+        
+        # Process files in chunks
+        chunk_size = 50
         dfs = []
-        for file in price_files:
-            try:
-                df = pd.read_csv(file, sep='\t')
-                if len(df) > 0:  # Only include non-empty dataframes
-                    dfs.append(df)
-                else:
-                    self.logger.warning(f"Skipping empty file: {file}")
-            except Exception as e:
-                self.logger.error(f"Failed to read {file}: {str(e)}")
-                
+        total_chunks = (len(price_files) + chunk_size - 1) // chunk_size
+        
+        for chunk_idx in range(0, len(price_files), chunk_size):
+            chunk_files = price_files[chunk_idx:chunk_idx + chunk_size]
+            self.logger.info(f"Reading chunk {(chunk_idx//chunk_size)+1}/{total_chunks} ({len(chunk_files)} files)")
+            
+            for file in chunk_files:
+                try:
+                    df = pd.read_csv(file, sep='\t')
+                    if len(df) > 0:  # Only include non-empty dataframes
+                        dfs.append(df)
+                    else:
+                        self.logger.warning(f"Skipping empty file: {file}")
+                except Exception as e:
+                    self.logger.error(f"Failed to read {file}: {str(e)}")
+            
+            # Log progress
+            processed_files = min(chunk_idx + chunk_size, len(price_files))
+            self.logger.info(f"Read {processed_files}/{len(price_files)} files")
+        
         if not dfs:
             self.logger.error("No valid dataframes to combine")
             return None
-            
+        
         # Harmonize and combine
         combined_df = self._harmonize_dates(dfs, interval)
         
-        # Save combined file
+        # Save combined file with compression
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_file = self.data_dir / f"combined_prices_{interval}_{timestamp}.tsv"
-        combined_df.to_csv(output_file, sep='\t', index=False, float_format='%.6f')
+        output_file = self.data_dir / f"combined_prices_{interval}_{timestamp}.tsv.gz"
+        combined_df.to_csv(output_file, sep='\t', index=False, float_format='%.6f', compression='gzip')
         
         self.logger.info(f"Saved combined file to {output_file}")
         return str(output_file)
