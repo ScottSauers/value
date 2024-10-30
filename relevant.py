@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import logging
 import re
 import pandas as pd
+from io import StringIO
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -19,9 +20,9 @@ class CompanyInfo:
     filing_date: str
     report_date: str
 
-def clean_text(text: str) -> str:
+def clean_text(text: Any) -> str:
     """Clean text by removing extra whitespace and special characters."""
-    return ' '.join(text.split()).strip()
+    return ' '.join(str(text).split()).strip()
 
 def extract_years_from_string(s: str) -> List[str]:
     """Extract four-digit years from a string."""
@@ -80,27 +81,30 @@ def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, An
 def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     """Save fields to a TSV file."""
     logger.debug(f"Saving data to {filename}")
-    with open(filename, 'w') as f:
-        f.write("Tag\tValue\tColumn Name\tSection\n")
-        
-        company_info = data.get('company_info', {})
-        f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\n")
-        f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\n")
-        f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\n")
-        f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\n")
-        
-        sections = {
-            'Income Statement': data.get('income_statement', []),
-            'Balance Sheet': data.get('balance_sheet', []),
-            'Cash Flow Statement': data.get('cash_flow', []),
-            'Key Financial Ratios': data.get('key_ratios', [])
-        }
-        
-        for section_name, items in sections.items():
-            for item in items:
-                column_name = item.get('column_name', 'N/A')
-                f.write(f"{item['label']}\t{item['value']}\t{column_name}\t{section_name}\n")
-    logger.debug("Data successfully saved to TSV.")
+    try:
+        with open(filename, 'w') as f:
+            f.write("Tag\tValue\tColumn Name\tSection\n")
+            
+            company_info = data.get('company_info', {})
+            f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\n")
+            f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\n")
+            f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\n")
+            f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\n")
+            
+            sections = {
+                'Income Statement': data.get('income_statement', []),
+                'Balance Sheet': data.get('balance_sheet', []),
+                'Cash Flow Statement': data.get('cash_flow', []),
+                'Key Financial Ratios': data.get('key_ratios', [])
+            }
+            
+            for section_name, items in sections.items():
+                for item in items:
+                    column_name = item.get('column_name', 'N/A')
+                    f.write(f"{item['label']}\t{item['value']}\t{column_name}\t{section_name}\n")
+        logger.debug("Data successfully saved to TSV.")
+    except Exception as e:
+        logger.error(f"Error saving TSV: {e}")
 
 class SECFieldExtractor:
     def __init__(self, company_name: str, email: str):
@@ -141,13 +145,15 @@ class SECFieldExtractor:
                 
             logger.info(f"Processing 10-K for {company_info.name} (CIK: {company_info.cik})")
             
+            # Wrap the HTML content in StringIO to fix the FutureWarning
             html_content = self.downloader.download_filing(url=metadata.primary_doc_url).decode()
             
             if not html_content:
                 logger.error("Downloaded HTML content is empty.")
                 return None
                 
-            self.soup = BeautifulSoup(html_content, 'html.parser')
+            # Use 'lxml' parser for better handling and suppress XMLParsedAsHTMLWarning
+            self.soup = BeautifulSoup(html_content, 'lxml')
             financial_data = self.extract_financial_data()
             financial_data['company_info'] = {
                 'name': company_info.name,
@@ -170,9 +176,9 @@ class SECFieldExtractor:
             'key_ratios': []
         }
         
-        # Use pandas to read all tables
+        # Use pandas to read all tables, wrapping the HTML in StringIO
         try:
-            tables = pd.read_html(str(self.soup), header=0, flavor='bs4')
+            tables = pd.read_html(StringIO(str(self.soup)), header=0, flavor='bs4')
             logger.info(f"Found {len(tables)} tables in the document.")
         except Exception as e:
             logger.error(f"Error reading tables with pandas: {e}")
@@ -205,7 +211,7 @@ class SECFieldExtractor:
             
             # Check if table contains target keywords for detailed debugging
             if any(keyword in table_text for keyword in target_keywords):
-                logger.debug(f"Table {idx} contains target keywords '{target_keywords}'. Printing entire table for debugging.")
+                logger.debug(f"Table {idx} contains target keywords {target_keywords}. Printing entire table for debugging.")
                 print(f"\n=== Table {idx}: {section} ===")
                 print(df.to_string(index=False))
                 print("=== End of Table ===\n")
