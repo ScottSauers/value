@@ -50,8 +50,8 @@ def preprocess_table(df):
         # Initialize headers list
         header_rows = []
 
-        # Iterate through the first 6 rows to find header rows
-        for i in range(min(6, len(df))):
+        # Iterate through the first 10 rows to find header rows
+        for i in range(min(10, len(df))):
             row = df.iloc[i].astype(str).str.lower()
             # Calculate the proportion of cells containing header keywords
             keyword_matches = row.str.contains('|'.join(header_keywords), regex=True)
@@ -61,21 +61,35 @@ def preprocess_table(df):
                 header_rows.append(row)
 
         if header_rows:
-            # Combine multiple header rows into a single header by concatenation
-            combined_header = header_rows[0].fillna('')
-            for additional_header in header_rows[1:]:
-                combined_header = combined_header + ' ' + additional_header.fillna('')
+            # Define label row keywords to exclude
+            label_row_keywords = ['years ended', 'total', 'percentage', 'change', 'subtotal']
+            filtered_header_rows = []
+            for row in header_rows:
+                if any(row.str.contains(keyword, regex=False).any() for keyword in label_row_keywords):
+                    logger.debug("Skipping label row in headers.")
+                    continue
+                filtered_header_rows.append(row)
 
-            # Clean and format the combined header
-            combined_header = combined_header.apply(clean_text).str.replace(r'\s+', ' ', regex=True)
+            if filtered_header_rows:
+                # Combine multiple header rows into a single header by concatenation
+                combined_header = filtered_header_rows[0].fillna('')
+                for additional_header in filtered_header_rows[1:]:
+                    combined_header = combined_header + ' ' + additional_header.fillna('')
 
-            # Assign the combined header to the DataFrame
-            df.columns = combined_header
+                # Clean and format the combined header
+                combined_header = combined_header.apply(clean_text).str.replace(r'\s+', ' ', regex=True)
 
-            # Drop the header rows from the DataFrame
-            df = df.iloc[len(header_rows):].reset_index(drop=True)
+                # Assign the combined header to the DataFrame
+                df.columns = combined_header
 
-            logger.debug("Combined multi-level headers and set as column names.")
+                # Drop the header rows from the DataFrame
+                df = df.iloc[len(header_rows):].reset_index(drop=True)
+
+                logger.debug("Combined multi-level headers and set as column names.")
+            else:
+                # No valid header rows after filtering, assign default names
+                df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
+                logger.debug("No valid header rows after filtering. Assigned generic column names.")
         else:
             # Attempt to use the first row as header if it contains header keywords
             first_row = df.iloc[0].astype(str).str.lower()
@@ -156,7 +170,9 @@ def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, An
             # Check if the cell contains a numeric value or parenthesized number
             numeric_pattern = r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$'
             if re.match(numeric_pattern, cleaned_cell.replace(' ', '')):
-                value = cleaned_cell
+                # Remove any non-numeric characters for value extraction
+                numeric_value = re.sub(r'[^\d\.-]', '', cleaned_cell)
+                value = numeric_value
                 # Get corresponding header if available
                 if i < len(headers):
                     column_name = clean_text(str(headers[i]))
@@ -286,7 +302,7 @@ class SECFieldExtractor:
             logger.info(f"Found {len(tables)} tables in the document.")
 
             # Optionally, print the first few tables for debugging
-            for idx, df in enumerate(tables[:10], start=1):
+            for idx, df in enumerate(tables[:50], start=1):
                 print(f"\n--- Raw Table {idx} ---")
                 for row_num in range(min(5, len(df))):
                     row = df.iloc[row_num].tolist()
