@@ -216,8 +216,11 @@ class SECFieldExtractor:
                 
                 # Identify the table type based on content
                 table_text = df.to_string().lower()
+
+                income_keywords = ['income', 'revenue', 'net income', 'operating income']
+                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', 'shareholders’ equity']
+                cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities', 'financing activities', 'net cash']
                 
-                # Classification logic remains the same...
                 if any(keyword in table_text for keyword in income_keywords):
                     section = 'Income Statement'
                 elif any(keyword in table_text for keyword in balance_keywords):
