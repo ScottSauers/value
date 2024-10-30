@@ -37,29 +37,35 @@ def preprocess_table(df):
     # Drop completely empty rows and columns
     df = df.dropna(how='all').dropna(axis=1, how='all')
     
-    # Handle multi-row headers by combining them
-    if df.iloc[0:3].apply(lambda x: x.astype(str).str.contains('Year|Month|Period|Date', case=False)).any().any():
-        # Combine first few rows if they contain header information
-        headers = []
-        for i in range(min(3, len(df))):
-            row = df.iloc[i]
-            if row.astype(str).str.contains('Year|Month|Period|Date', case=False).any():
-                headers.append(row)
+    # Define additional keywords to identify header rows
+    header_keywords = ['Year', 'Month', 'Period', 'Date', 'Fiscal', 'Quarter', 'Type']
+    
+    # Initialize headers list
+    headers = []
+    
+    # Iterate through the first 5 rows to find header rows
+    for i in range(min(5, len(df))):
+        row = df.iloc[i]
+        if row.astype(str).str.contains('|'.join(header_keywords), case=False, regex=True).any():
+            headers.append(row)
+    
+    if headers:
+        # Combine headers vertically
+        header = pd.concat(headers).fillna('')
+        # Create meaningful column names using clean_text to ensure strings
+        columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
         
-        if headers:
-            # Combine headers vertically
-            header = pd.concat(headers).fillna('')
-            # Create meaningful column names using clean_text to ensure strings
-            columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
-            
-            # Check if header length matches df columns
-            if len(columns) == len(df.columns):
-                df.columns = columns  # Set new headers if they match
-                df = df.iloc[len(headers):]  # Drop header rows
-            else:
-                # Fallback: Set default column names if there's a mismatch
-                df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
-
+        # Check if header length matches df columns
+        if len(columns) == len(df.columns):
+            df.columns = columns  # Set new headers if they match
+            df = df.iloc[len(headers):]  # Drop header rows
+        else:
+            # Fallback: Set default column names if there's a mismatch
+            df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+    else:
+        # If no headers detected, assign default column names
+        df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+    
     # Clean column names
     df.columns = [clean_text(str(col)).lower() for col in df.columns]
     
