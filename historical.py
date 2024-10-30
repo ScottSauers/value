@@ -13,13 +13,6 @@ class HistoricalDataProcessor:
     """Process and combine historical price data for multiple stocks."""
     
     def __init__(self, data_dir: str = "./data", max_workers: int = 4):
-        """
-        Initialize the processor with configuration.
-        
-        Args:
-            data_dir: Directory for storing price data
-            max_workers: Maximum number of parallel workers
-        """
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.max_workers = max_workers
@@ -36,68 +29,63 @@ class HistoricalDataProcessor:
         )
         self.logger = logging.getLogger(__name__)
     
-    def _is_cache_fresh(self, ticker: str, interval: str) -> bool:
+    def _get_latest_file(self, ticker: str, interval: str) -> Path:
+        """Get the most recent file for a ticker and interval."""
+        pattern = f"{ticker}_prices_{interval}_*.tsv"
+        files = list(self.data_dir.glob(pattern))
+        return max(files, key=lambda x: x.stat().st_mtime) if files else None
+
+    def _is_cache_fresh(self, ticker: str, interval: str) -> tuple[bool, Path]:
         """
         Check if cached data for a ticker is fresh (less than 24 hours old).
-        
-        Args:
-            ticker: Stock ticker symbol
-            interval: Time interval (e.g., "1d", "1wk", "1mo")
-            
-        Returns:
-            Boolean indicating if cache is fresh
+        Returns (is_fresh, latest_file_path)
         """
-        pattern = f"{ticker}_prices_{interval}_*.tsv"
-        existing_files = list(self.data_dir.glob(pattern))
+        latest_file = self._get_latest_file(ticker, interval)
         
-        if not existing_files:
-            return False
+        if not latest_file:
+            return False, None
             
-        # Get most recent file
-        latest_file = max(existing_files, key=lambda x: x.stat().st_mtime)
         modified_time = datetime.fromtimestamp(latest_file.stat().st_mtime)
+        is_fresh = (datetime.now() - modified_time) < timedelta(hours=24)
         
-        return (datetime.now() - modified_time) < timedelta(hours=24)
+        # Verify file has content
+        if is_fresh:
+            try:
+                df = pd.read_csv(latest_file, sep='\t')
+                if len(df) == 0:
+                    self.logger.warning(f"Cache file for {ticker} ({interval}) is empty")
+                    return False, None
+                return True, latest_file
+            except Exception:
+                return False, None
+                
+        return False, None
 
     def process_single_ticker(self, ticker: str, intervals: List[str]) -> Dict:
-        """
-        Process a single ticker, using cache if available.
-        
-        Args:
-            ticker: Stock ticker symbol
-            intervals: List of time intervals to process
-            
-        Returns:
-            Dictionary of results per interval
-        """
+        """Process a single ticker, using cache if available."""
         results = {}
         
         for interval in intervals:
-            if self._is_cache_fresh(ticker, interval):
+            is_fresh, latest_file = self._is_cache_fresh(ticker, interval)
+            
+            if is_fresh and latest_file:
                 self.logger.info(f"Using cached data for {ticker} ({interval})")
-                pattern = f"{ticker}_prices_{interval}_*.tsv"
-                latest_file = max(
-                    self.data_dir.glob(pattern),
-                    key=lambda x: x.stat().st_mtime
-                )
                 results[interval] = (str(latest_file), '')
             else:
                 try:
                     self.logger.info(f"Fetching fresh data for {ticker} ({interval})")
                     interval_results = self.extractor.process_ticker(ticker, [interval])
-                    results.update(interval_results)
+                    if interval_results:
+                        results.update(interval_results)
+                    else:
+                        self.logger.error(f"No data returned for {ticker} ({interval})")
                 except Exception as e:
                     self.logger.error(f"Failed to process {ticker} ({interval}): {str(e)}")
                     
         return results
 
     def _get_tickers_from_csv(self) -> List[str]:
-        """
-        Get list of tickers from small_cap_stocks_latest.csv
-        
-        Returns:
-            List of ticker symbols
-        """
+        """Get list of tickers from small_cap_stocks_latest.csv"""
         try:
             df = pd.read_csv('small_cap_stocks_latest.csv')
             tickers = df['ticker'].str.strip().tolist()
@@ -109,51 +97,43 @@ class HistoricalDataProcessor:
 
     def _harmonize_dates(self, dfs: List[pd.DataFrame], interval: str) -> pd.DataFrame:
         """
-        Harmonize dates across multiple dataframes.
-        
-        Args:
-            dfs: List of dataframes to harmonize
-            interval: Time interval of the data
-            
-        Returns:
-            Combined DataFrame with harmonized dates
+        Harmonize dates across multiple dataframes with a more flexible approach.
+        Now keeps all dates and fills missing data with NaN.
         """
         self.logger.info(f"Harmonizing {len(dfs)} dataframes for {interval} interval")
         
         # Convert all date columns to datetime
         for df in dfs:
-            df['date'] = pd.to_datetime(df['date'])
-            
-        # Get the common date range
-        min_date = max(df['date'].min() for df in dfs)
-        max_date = min(df['date'].max() for df in dfs)
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
         
-        self.logger.info(f"Common date range: {min_date.date()} to {max_date.date()}")
+        # Get all unique dates
+        all_dates = sorted(set().union(*[set(df['date'].unique()) for df in dfs]))
+        self.logger.info(f"Date range: {min(all_dates)} to {max(all_dates)}")
         
-        # Filter each dataframe to common range and sort
-        harmonized_dfs = []
+        # Create a multi-index with all combinations of dates and tickers
+        tickers = [df['ticker'].iloc[0] for df in dfs]  # Assuming each df has one ticker
+        multi_index = pd.MultiIndex.from_product([all_dates, tickers], names=['date', 'ticker'])
+        
+        # Initialize empty dataframe with all date-ticker combinations
+        columns = ['open', 'high', 'low', 'close', 'volume']
+        result = pd.DataFrame(index=multi_index, columns=columns)
+        
+        # Fill in data from each dataframe
         for df in dfs:
-            mask = (df['date'] >= min_date) & (df['date'] <= max_date)
-            harmonized_df = df[mask].sort_values('date')
-            harmonized_dfs.append(harmonized_df)
-            
-        # Combine all dataframes
-        result = pd.concat(harmonized_dfs, axis=0)
+            ticker = df['ticker'].iloc[0]
+            df_indexed = df.set_index(['date', 'ticker'])
+            result.loc[pd.IndexSlice[:, ticker], :] = df_indexed[columns]
+        
+        # Reset index and sort
+        result = result.reset_index()
         result = result.sort_values(['date', 'ticker'])
         
         self.logger.info(f"Final harmonized shape: {result.shape}")
         return result
 
     def combine_price_files(self, interval: str) -> str:
-        """
-        Combine all price files for a given interval into one harmonized file.
-        
-        Args:
-            interval: Time interval to combine
-            
-        Returns:
-            Path to combined file
-        """
+        """Combine all price files for a given interval into one harmonized file."""
         pattern = f"*_prices_{interval}_*.tsv"
         price_files = list(self.data_dir.glob(pattern))
         
@@ -165,7 +145,10 @@ class HistoricalDataProcessor:
         for file in price_files:
             try:
                 df = pd.read_csv(file, sep='\t')
-                dfs.append(df)
+                if len(df) > 0:  # Only include non-empty dataframes
+                    dfs.append(df)
+                else:
+                    self.logger.warning(f"Skipping empty file: {file}")
             except Exception as e:
                 self.logger.error(f"Failed to read {file}: {str(e)}")
                 
@@ -179,18 +162,13 @@ class HistoricalDataProcessor:
         # Save combined file
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_file = self.data_dir / f"combined_prices_{interval}_{timestamp}.tsv"
-        combined_df.to_csv(output_file, sep='\t', index=False)
+        combined_df.to_csv(output_file, sep='\t', index=False, float_format='%.6f')
         
         self.logger.info(f"Saved combined file to {output_file}")
         return str(output_file)
 
     def process_all_tickers(self, intervals: List[str] = None):
-        """
-        Process all tickers from CSV in parallel.
-        
-        Args:
-            intervals: List of time intervals to process
-        """
+        """Process all tickers from CSV in parallel."""
         if intervals is None:
             intervals = ["1d", "1wk", "1mo"]
             
@@ -213,10 +191,15 @@ class HistoricalDataProcessor:
                 
                 try:
                     results = future.result()
-                    self.logger.info(
-                        f"Processed {ticker} ({processed_count}/{total_tickers})"
-                        f" - Success for intervals: {list(results.keys())}"
-                    )
+                    if results:
+                        self.logger.info(
+                            f"Processed {ticker} ({processed_count}/{total_tickers})"
+                            f" - Success for intervals: {list(results.keys())}"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"No data obtained for {ticker} ({processed_count}/{total_tickers})"
+                        )
                 except Exception as e:
                     self.logger.error(f"Failed to process {ticker}: {str(e)}")
                     
@@ -262,6 +245,7 @@ def main():
             print(f"Total rows: {len(df):,}")
             print(f"Unique tickers: {df['ticker'].nunique():,}")
             print(f"Date range: {df['date'].min()} to {df['date'].max()}")
+            print(f"Data completeness: {(df['close'].notna().sum() / len(df)) * 100:.1f}%")
             
     except Exception as e:
         print(f"\nError during processing: {str(e)}")
