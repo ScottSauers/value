@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import gzip
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import os
 from tqdm import tqdm
@@ -95,25 +95,41 @@ class DataTransformer:
         return wide_df
 
     def _save_transformed(self, df: pd.DataFrame, interval: str):
-        """Save transformed data."""
+        """Save transformed data as CSV and Parquet."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_file = self.output_dir / f"price_data_{interval}_{timestamp}.parquet"
+        output_file_parquet = self.output_dir / f"price_data_{interval}_{timestamp}.parquet"
+        output_file_csv = self.output_dir / f"price_data_{interval}_{timestamp}.csv"
         
-        self.logger.info(f"Saving to {output_file}")
-        df.to_parquet(output_file)
+        self.logger.info(f"Saving to {output_file_parquet} and {output_file_csv}")
+        df.to_parquet(output_file_parquet)
+        df.to_csv(output_file_csv, index=False, sep='\t')
         
-        # Create symlink to latest
+        # Create symlink to latest Parquet file
         latest_link = self.output_dir / f"price_data_{interval}_latest.parquet"
         if latest_link.exists():
             latest_link.unlink()
-        latest_link.symlink_to(output_file.name)
+        latest_link.symlink_to(output_file_parquet.name)
         
         self.logger.info("Save completed")
-        return output_file
+        return output_file_csv, output_file_parquet
+
+    def _get_latest_parquet_file_within_24h(self, interval: str) -> Path:
+        """Check if a recent Parquet file exists within the last 24 hours."""
+        latest_file = self._get_latest_file(f"price_data_{interval}_*.parquet")
+        if latest_file and (datetime.now() - datetime.fromtimestamp(latest_file.stat().st_mtime)) < timedelta(hours=24):
+            return latest_file
+        return None
 
     def process_interval(self, interval: str):
         """Process data for a specific interval (e.g., '1d', '1wk')."""
         try:
+            # Check for recent processed Parquet file
+            recent_file = self._get_latest_parquet_file_within_24h(interval)
+            if recent_file:
+                self.logger.info(f"Recent Parquet file found: {recent_file}")
+                print(f"Using existing file: {recent_file}")
+                return
+
             # Find latest price file
             price_pattern = f"combined_prices_{interval}_*.tsv*"
             latest_price = self._get_latest_file(price_pattern)
@@ -126,7 +142,7 @@ class DataTransformer:
             wide_df = self._transform_to_wide(df, interval)
             
             # Save results
-            output_file = self._save_transformed(wide_df, interval)
+            output_file_csv, output_file_parquet = self._save_transformed(wide_df, interval)
             
             # Print summary
             print(f"\nProcessed {interval} data:")
@@ -134,7 +150,7 @@ class DataTransformer:
             print(f"Output shape: {wide_df.shape}")
             print(f"Unique tickers: {len(df['ticker'].unique()):,}")
             print(f"Date range: {wide_df['date'].min()} to {wide_df['date'].max()}")
-            print(f"Saved to: {output_file}")
+            print(f"Saved to: {output_file_csv}, {output_file_parquet}")
             
         except Exception as e:
             print(f"Error processing {interval} interval: {str(e)}")
