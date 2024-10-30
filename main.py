@@ -75,20 +75,11 @@ def main():
             logger.error("No financial data extracted from the filings.")
             sys.exit(1)
 
-        # Save all financial data to TSV
-        # Initialize the TSV file with headers
-        tsv_filename = "sec_fields.tsv"
-        try:
-            with open(tsv_filename, 'w') as f:
-                f.write("Tag\tValue\tColumn Name\tSection\tForm Type\tFiling Date\n")
+        # Save all financial data to unique TSV files
+        for financial_data in all_financial_data:
+            parser.save_fields_to_tsv(financial_data)
 
-            for financial_data in all_financial_data:
-                parser.save_fields_to_tsv(financial_data, filename=tsv_filename)
-
-            logger.info(f"Data extraction complete. Results saved to {tsv_filename}")
-        except Exception as e:
-            logger.error(f"Error writing to TSV file: {e}")
-            sys.exit(1)
+        logger.info(f"Data extraction complete. Results saved as separate TSV files.")
 
     else:
         logger.error("Failed to extract fields from filings")
