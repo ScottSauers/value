@@ -266,8 +266,17 @@ class SECFieldExtractor:
             # Print the first two raw tables for inspection
             for idx, df in enumerate(tables[:2], start=1):
                 print(f"\n--- Raw Table {idx} ---")
-                print(df.head(5))  # Print the first five rows
-                print(df.tail(1))  # Print the last row
+                
+                # Print the first five rows
+                for row_num in range(min(5, len(df))):
+                    row = df.iloc[row_num].tolist()  # Convert row to list
+                    print(f"Row {row_num + 1}: {row}")
+                
+                # Print the last row if the table has more than 5 rows
+                if len(df) > 5:
+                    last_row = df.iloc[-1].tolist()  # Convert last row to list
+                    print(f"Last Row: {last_row}")
+                
                 print("----------------------\n")
 
             for idx, df in enumerate(tables, start=1):
