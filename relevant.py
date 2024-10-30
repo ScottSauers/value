@@ -266,7 +266,8 @@ class SECFieldExtractor:
             # Print the first two raw tables for inspection
             for idx, df in enumerate(tables[:2], start=1):
                 print(f"\n--- Raw Table {idx} ---")
-                print(df.head())
+                print(df.head(5))  # Print the first five rows
+                print(df.tail(1))  # Print the last row
                 print("----------------------\n")
 
             for idx, df in enumerate(tables, start=1):
