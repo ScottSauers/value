@@ -24,6 +24,13 @@ class CompanyInfo:
     cik: str
     filing_date: str
     report_date: str
+    form_type: str
+    file_number: str
+    fiscal_year_end: str
+    period_of_report: str
+    accepted_date: str
+    sec_url: str
+    document_url: str
 
 def clean_text(text: Any) -> str:
     """Clean text by removing extra whitespace and special characters."""
@@ -243,20 +250,23 @@ class SECFieldExtractor:
         self.downloader = Downloader(company_name, email)
 
     def _get_company_info(self, identifier: str, filing_metadata) -> Optional[CompanyInfo]:
-        try:
-            if not filing_metadata:
-                logger.error("Filing metadata is empty.")
-                return None
-
-            return CompanyInfo(
-                name=filing_metadata.company_name,
-                cik=filing_metadata.cik,
-                filing_date=filing_metadata.filing_date,
-                report_date=filing_metadata.report_date
-            )
-        except Exception as e:
-            logger.error(f"Error getting company info: {e}")
+        if not filing_metadata:
+            logger.error("Filing metadata is missing.")
             return None
+    
+        return CompanyInfo(
+            name=filing_metadata.company_name,
+            cik=filing_metadata.cik,
+            filing_date=filing_metadata.filing_date,
+            report_date=filing_metadata.report_date,
+            form_type=filing_metadata.form_type,
+            file_number=filing_metadata.file_number,
+            fiscal_year_end=filing_metadata.fiscal_year_end,
+            period_of_report=filing_metadata.period_of_report,
+            accepted_date=filing_metadata.accepted_date,
+            sec_url=filing_metadata.sec_url,
+            document_url=filing_metadata.primary_doc_url
+        )
 
     def get_latest_10k_fields(self, identifier: str) -> Optional[Dict[str, Any]]:
         try:
