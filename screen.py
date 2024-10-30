@@ -276,7 +276,7 @@ def main():
     """Main execution function."""
     start_time = time.time()
     
-    screener = MarketCapScreener(max_workers=20)
+    screener = MarketCapScreener()
     
     try:
         small_caps, all_stocks = screener.screen_small_caps(max_market_cap=50_000_000)
