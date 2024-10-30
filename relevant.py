@@ -252,18 +252,19 @@ class SECFieldExtractor:
         if not filing_metadata:
             logger.error("Filing metadata is missing.")
             return None
-        
+    
+        # Access attributes directly
         return CompanyInfo(
-            name=filing_metadata.get('company_name', 'N/A'),
-            cik=filing_metadata.get('cik', 'N/A'),
-            filing_date=filing_metadata.get('filing_date', 'N/A'),
-            report_date=filing_metadata.get('report_date', 'N/A'),
-            form_type=filing_metadata.get('form_type', 'N/A'),
-            fiscal_year_end=filing_metadata.get('fiscal_year_end', 'N/A'),
-            period_of_report=filing_metadata.get('period_of_report', 'N/A'),
-            accepted_date=filing_metadata.get('accepted_date', 'N/A'),
-            sec_url=filing_metadata.get('sec_url', 'N/A'),
-            document_url=filing_metadata.get('primary_doc_url', 'N/A')
+            name=filing_metadata.company_name if hasattr(filing_metadata, 'company_name') else 'N/A',
+            cik=filing_metadata.cik if hasattr(filing_metadata, 'cik') else 'N/A',
+            filing_date=filing_metadata.filing_date if hasattr(filing_metadata, 'filing_date') else 'N/A',
+            report_date=filing_metadata.report_date if hasattr(filing_metadata, 'report_date') else 'N/A',
+            form_type=filing_metadata.form_type if hasattr(filing_metadata, 'form_type') else 'N/A',
+            fiscal_year_end=filing_metadata.fiscal_year_end if hasattr(filing_metadata, 'fiscal_year_end') else 'N/A',
+            period_of_report=filing_metadata.period_of_report if hasattr(filing_metadata, 'period_of_report') else 'N/A',
+            accepted_date=filing_metadata.accepted_date if hasattr(filing_metadata, 'accepted_date') else 'N/A',
+            sec_url=filing_metadata.sec_url if hasattr(filing_metadata, 'sec_url') else 'N/A',
+            document_url=filing_metadata.primary_doc_url if hasattr(filing_metadata, 'primary_doc_url') else 'N/A'
         )
 
     def get_latest_10k_fields(self, identifier: str) -> Optional[Dict[str, Any]]:
