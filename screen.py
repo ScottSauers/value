@@ -151,27 +151,27 @@ class MarketCapScreener:
             self.logger.error(f"Failed to get exchange data: {str(e)}")
             raise
 
-def get_stock_data_batch(self, tickers: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Get stock data for multiple tickers with true parallelization."""
-    results = {}
-    futures = []
-    
-    with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-        # Submit each ticker for parallel processing
-        for ticker in tickers:
-            futures.append((ticker, executor.submit(self._get_single_ticker_data, ticker)))
-            
-        # Collect results as they complete
-        for ticker, future in futures:
-            try:
-                data = future.result()
-                if data:
-                    results[ticker] = data
-            except Exception as e:
-                self.logger.debug(f"Error processing {ticker}: {str(e)}")
-                self.stats['errors']['processing'] += 1
+    def get_stock_data_batch(self, tickers: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Get stock data for multiple tickers with true parallelization."""
+        results = {}
+        futures = []
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit each ticker for parallel processing
+            for ticker in tickers:
+                futures.append((ticker, executor.submit(self._get_single_ticker_data, ticker)))
                 
-    return results
+            # Collect results as they complete
+            for ticker, future in futures:
+                try:
+                    data = future.result()
+                    if data:
+                        results[ticker] = data
+                except Exception as e:
+                    self.logger.debug(f"Error processing {ticker}: {str(e)}")
+                    self.stats['errors']['processing'] += 1
+                    
+        return results
 
     def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get data for a single ticker with proper rate limiting."""
