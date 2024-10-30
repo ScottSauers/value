@@ -90,75 +90,64 @@ class MarketCapScreener:
         """Get data for a single ticker with proper rate limiting."""
         print(f"\nStarting data retrieval for ticker: {ticker}")
         try:
-            time.sleep(0.1)
-            
-            # Use the finagg API for basic price data
-            print(f"Fetching price data for {ticker} using finagg...")
+            # First get basic price data using finagg's yfinance wrapper
+            # This is more reliable than direct yfinance for price data
             try:
                 price_data = finagg.yfinance.api.get(ticker, period="5d")
                 if price_data.empty:
                     print(f"Price data for {ticker} is empty. Skipping.")
                     return None
                 latest_price = price_data['close'].iloc[-1]
-                avg_volume = price_data['volume'].mean()
                 print(f"Latest price for {ticker}: {latest_price}")
-                print(f"Average volume for {ticker}: {avg_volume}")
             except Exception as e:
-                self.logger.debug(f"Failed to get finagg data for {ticker}: {str(e)}")
-                print(f"Exception occurred while fetching finagg data for {ticker}: {str(e)}")
+                self.logger.debug(f"Failed to get finagg price data for {ticker}: {str(e)}")
                 return None
-                
-            # Initialize result with finagg data
-            result = {
-                'ticker': ticker,
-                'price': latest_price,
-                'volume': avg_volume,
-                'shares_outstanding': None,  # Will try to get from yfinance
-                'market_cap': None,  # Will calculate after trying yfinance
-                'high': price_data['high'].iloc[-1] if not price_data.empty else None,
-                'low': price_data['low'].iloc[-1] if not price_data.empty else None,
-                'open': price_data['open'].iloc[-1] if not price_data.empty else None
-            }
-                
-            # Try to get additional data from yfinance, but don't fail if unavailable
+    
+            # Now get market cap data directly from yfinance
             try:
-                print(f"Fetching additional info for {ticker} using yfinance...")
                 ticker_obj = yf.Ticker(ticker, session=self.session)
                 info = ticker_obj.info
                 
-                if info:
-                    # If we have shares outstanding, we can calculate market cap
-                    shares = info.get('sharesOutstanding')
-                    if shares:
-                        result['shares_outstanding'] = shares
-                        result['market_cap'] = latest_price * shares
-                    # If not, try to get market cap directly
-                    elif info.get('marketCap'):
-                        result['market_cap'] = info['marketCap']
-                        # Estimate shares outstanding
-                        if latest_price > 0:
-                            result['shares_outstanding'] = info['marketCap'] / latest_price
-                if not info or ('marketCap' not in info and 'sharesOutstanding' not in info):
-                    self.logger.debug(f"No market cap data available for {ticker}")
-                    self.stats['errors']['no_market_cap'] += 1
+                if not info:
+                    print(f"No info available for {ticker}")
                     return None
-                
+    
+                # Try multiple methods to get accurate market cap
+                market_cap = None
+                shares_outstanding = None
+    
+                # Method 1: Direct market cap
+                if 'marketCap' in info:
+                    market_cap = info['marketCap']
+                    shares_outstanding = market_cap / latest_price if latest_price > 0 else None
+    
+                # Method 2: Calculate from shares
+                if market_cap is None and 'sharesOutstanding' in info:
+                    shares_outstanding = info['sharesOutstanding']
+                    market_cap = shares_outstanding * latest_price
+    
+                # If we still don't have market cap data, skip this ticker
+                if market_cap is None or market_cap <= 0:
+                    print(f"No valid market cap data for {ticker}")
+                    return None
+    
+                return {
+                    'ticker': ticker,
+                    'price': latest_price,
+                    'shares_outstanding': shares_outstanding,
+                    'market_cap': market_cap,
+                    'high': price_data['high'].iloc[-1],
+                    'low': price_data['low'].iloc[-1],
+                    'open': price_data['open'].iloc[-1],
+                    'volume': price_data['volume'].iloc[-1]
+                }
+    
             except Exception as e:
-                # Log the error but continue with the data we have
                 self.logger.debug(f"Failed to get yfinance data for {ticker}: {str(e)}")
-                print(f"yfinance data unavailable for {ticker}: {str(e)}")
-                
-            # In _get_single_ticker_data:
-            if result['market_cap'] is None:
-                # Don't try to estimate - if we can't get real market cap data,
-                print(f"Unable to determine accurate market cap for {ticker}")
                 return None
-                
-            return result
-                
+    
         except Exception as e:
-            self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
-            print(f"Exception occurred while processing {ticker}: {str(e)}")
+            self.logger.debug(f"Error processing {ticker}: {str(e)}")
             return None
 
     def _get_resume_path(self) -> Path:
@@ -413,13 +402,39 @@ class MarketCapScreener:
         return small_caps, all_stocks_df
 
     def validate_market_cap(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Validate market cap data with less strict filtering."""
+        """Validate market cap data with filtering."""
         print(f"\nValidating market cap data for {len(df)} records...")
         if df.empty:
-            print("DataFrame is empty. Skipping validation.")
             return df
-            
+                
         validated = df.copy()
+        
+        # Convert numeric columns
+        numeric_cols = ['market_cap', 'price', 'shares_outstanding']
+        for col in numeric_cols:
+            if col in validated.columns:
+                validated[col] = pd.to_numeric(validated[col], errors='coerce')
+    
+        # Strict validation
+        before_filter = len(validated)
+        validated = validated[
+            (validated['market_cap'].notna()) &
+            (validated['market_cap'] > 0) &
+            (validated['price'].notna()) &
+            (validated['price'] > 0) &
+            (validated['shares_outstanding'].notna()) &
+            (validated['shares_outstanding'] > 0)
+        ].copy()
+    
+        # Cross-validate market cap with price * shares
+        calculated_cap = validated['price'] * validated['shares_outstanding']
+        validated = validated[
+            (validated['market_cap'] >= calculated_cap * 0.5) &  # Allow variance
+            (validated['market_cap'] <= calculated_cap * 2)
+        ]
+    
+        print(f"After validation: {len(validated)} of {before_filter} records passed")
+        return validated
         
         # Convert numeric columns
         numeric_cols = ['market_cap', 'price', 'shares_outstanding']
@@ -551,16 +566,34 @@ class MarketCapScreener:
             if count > 0:
                 print(f"- {error_type}: {count}")
 
+
+
+def clear_caches(self):
+    """Clear all cache files to ensure fresh data."""
+    cache_files = ['market_caps.pkl', 'exchanges.pkl', 'resume_data.pkl']
+    try:
+        for cache_file in cache_files:
+            cache_path = self.CACHE_DIR / cache_file
+            if cache_path.exists():
+                cache_path.unlink()
+                print(f"Deleted cache: {cache_file}")
+        if os.path.exists("yfinance.cache"):
+            os.remove("yfinance.cache")
+            print("Deleted YFinance cache")
+    except Exception as e:
+        print(f"Error clearing caches: {e}")
+    
 def main():
-    """Main execution function with improved error handling and reporting."""
     print("\n=== MarketCapScreener Execution Started ===")
     start_time = time.time()
     
     try:
-        print("\nCreating MarketCapScreener instance with max_workers=10...")
-        screener = MarketCapScreener(max_workers=10)  # Reduced workers for better stability
+        print("\nCreating MarketCapScreener instance...")
+        screener = MarketCapScreener(max_workers=10)
         
-        # Catch keyboard interrupts to allow graceful shutdown
+        print("\nClearing all caches for fresh data...")
+        screener.clear_caches()
+        
         try:
             print("\nStarting screening for small cap stocks...")
             small_caps, all_stocks = screener.screen_small_caps(max_market_cap=50_000_000)
