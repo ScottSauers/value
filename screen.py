@@ -300,18 +300,13 @@ class MarketCapScreener:
 
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Screen for small cap stocks with improved caching and validation."""
-        try:
-            # Try to load from cache
-            cached_data = self._load_cache('market_caps')
-            if cached_data is not None and not cached_data.empty:
-                print("Using cached market cap data...")
-                try:
-                    all_stocks_df = self.validate_market_cap(cached_data)
-                    small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
-                    if not small_caps.empty:
-                        return small_caps, all_stocks_df
-        except Exception as e:
-            self.logger.warning(f"Cache validation failed: {str(e)}")
+        cached_data = self._load_cache('market_caps')
+        if cached_data is not None and not cached_data.empty:
+            print("Using cached market cap data...")
+            all_stocks_df = self.validate_market_cap(cached_data)
+            small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
+            if not small_caps.empty:
+                return small_caps, all_stocks_df
         
         # Get exchange-listed companies
         print("\nFetching exchange-listed companies...")
@@ -365,10 +360,6 @@ class MarketCapScreener:
         self._print_completion_stats()
         
         return small_caps, all_stocks_df
-        
-        except Exception as e:
-            self.logger.error(f"Screening failed: {str(e)}")
-                raise
 
     def validate_market_cap(self, df: pd.DataFrame) -> pd.DataFrame:
         """Comprehensive market cap validation."""
