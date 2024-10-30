@@ -247,20 +247,20 @@ class SECFieldExtractor:
         self.downloader = Downloader(company_name, email)
 
     def _get_company_info(self, identifier: str, filing_metadata) -> Optional[CompanyInfo]:
-        if not filing_metadata:
-            logger.error("Filing metadata is missing.")
+        try:
+            return CompanyInfo(
+                name=filing_metadata.company_name if hasattr(filing_metadata, 'company_name') else 'N/A',
+                cik=filing_metadata.cik if hasattr(filing_metadata, 'cik') else 'N/A',
+                form_type=filing_metadata.form_type if hasattr(filing_metadata, 'form_type') else 'N/A',
+                fiscal_year_end=filing_metadata.fiscal_year_end if hasattr(filing_metadata, 'fiscal_year_end') else 'N/A',
+                period_of_report=filing_metadata.period_of_report if hasattr(filing_metadata, 'period_of_report') else 'N/A',
+                accepted_date=filing_metadata.accepted_date if hasattr(filing_metadata, 'accepted_date') else 'N/A',
+                sec_url=filing_metadata.sec_url if hasattr(filing_metadata, 'sec_url') else 'N/A',
+                document_url=filing_metadata.primary_doc_url if hasattr(filing_metadata, 'primary_doc_url') else 'N/A'
+            )
+        except Exception as e:
+            logger.error(f"Error getting company info: {e}")
             return None
-    
-        return CompanyInfo(
-            name=filing_metadata.get('company_name', 'N/A'),
-            cik=filing_metadata.get('cik', 'N/A'),
-            form_type=filing_metadata.get('form_type', 'N/A'),
-            fiscal_year_end=filing_metadata.get('fiscal_year_end', 'N/A'),
-            period_of_report=filing_metadata.get('period_of_report', 'N/A'),
-            accepted_date=filing_metadata.get('accepted_date', 'N/A'),
-            sec_url=filing_metadata.get('sec_url', 'N/A'),
-            document_url=filing_metadata.get('primary_doc_url', 'N/A')
-        )
 
 
     def get_latest_10k_fields(self, identifier: str) -> Optional[Dict[str, Any]]:
