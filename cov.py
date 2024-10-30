@@ -28,8 +28,8 @@ class DataTransformer:
         self.logger = logging.getLogger(__name__)
 
     def _get_latest_file(self, pattern: str) -> Path:
-        """Get most recent file matching pattern."""
-        files = list(self.data_dir.glob(pattern))
+        """Get most recent file matching pattern, excluding symlinks."""
+        files = [f for f in self.data_dir.glob(pattern) if not f.is_symlink()]
         if not files:
             return None
         return max(files, key=lambda x: x.stat().st_mtime)
@@ -106,7 +106,7 @@ class DataTransformer:
         
         # Create symlink to latest Parquet file
         latest_link = self.output_dir / f"price_data_{interval}_latest.parquet"
-        if latest_link.exists():
+        if latest_link.exists() or latest_link.is_symlink():
             latest_link.unlink()
         latest_link.symlink_to(output_file_parquet.name)
         
@@ -116,8 +116,15 @@ class DataTransformer:
     def _get_latest_parquet_file_within_24h(self, interval: str) -> Path:
         """Check if a recent Parquet file exists within the last 24 hours."""
         latest_file = self._get_latest_file(f"price_data_{interval}_*.parquet")
-        if latest_file and (datetime.now() - datetime.fromtimestamp(latest_file.stat().st_mtime)) < timedelta(hours=24):
-            return latest_file
+        if latest_file:
+            file_mtime = datetime.fromtimestamp(latest_file.stat().st_mtime)
+            if (datetime.now() - file_mtime) < timedelta(hours=24):
+                self.logger.info(f"Found recent Parquet file: {latest_file} (modified {file_mtime})")
+                return latest_file
+            else:
+                self.logger.info(f"No Parquet file within last 24 hours for interval {interval}.")
+        else:
+            self.logger.info(f"No Parquet files found for interval {interval}.")
         return None
 
     def process_interval(self, interval: str):
@@ -126,7 +133,7 @@ class DataTransformer:
             # Check for recent processed Parquet file
             recent_file = self._get_latest_parquet_file_within_24h(interval)
             if recent_file:
-                self.logger.info(f"Recent Parquet file found: {recent_file}")
+                self.logger.info(f"Using existing file: {recent_file}")
                 print(f"Using existing file: {recent_file}")
                 return
 
@@ -154,6 +161,7 @@ class DataTransformer:
             
         except Exception as e:
             print(f"Error processing {interval} interval: {str(e)}")
+            self.logger.error(f"Error processing {interval} interval: {str(e)}")
             raise
 
 def main():
