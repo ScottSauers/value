@@ -210,24 +210,24 @@ class MarketCapScreener:
             return None
 
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
-            """Screen for small cap stocks with progressive caching."""
-            # Try loading existing results first
-            cached_data = self._load_cache('market_caps')
-            print(f"\nAttempting to load cache...")
-            if cached_data is not None:
-                print(f"Cache found with {len(cached_data)} entries")
-                if not cached_data.empty:
-                    print("Using cached market cap data...")
-                    all_stocks_df = self.validate_market_cap(cached_data)
-                    print(f"After validation: {len(all_stocks_df)} entries")
-                    small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
-                    print(f"Found {len(small_caps)} companies under {max_market_cap:,} market cap")
-                    if not small_caps.empty:
-                        return small_caps, all_stocks_df
-                else:
-                    print("Cached data was empty")
+        """Screen for small cap stocks with progressive caching."""
+        # Try loading existing results first
+        cached_data = self._load_cache('market_caps')
+        print(f"\nAttempting to load cache...")
+        if cached_data is not None:
+            print(f"Cache found with {len(cached_data)} entries")
+            if not cached_data.empty:
+                print("Using cached market cap data...")
+                all_stocks_df = self.validate_market_cap(cached_data)
+                print(f"After validation: {len(all_stocks_df)} entries")
+                small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
+                print(f"Found {len(small_caps)} companies under {max_market_cap:,} market cap")
+                if not small_caps.empty:
+                    return small_caps, all_stocks_df
             else:
-                print("No valid cache found")
+                print("Cached data was empty")
+        else:
+            print("No valid cache found")
         
         # Check for resume data
         if self._load_resume_state():
