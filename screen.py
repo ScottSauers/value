@@ -88,7 +88,7 @@ class MarketCapScreener:
 
     def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get data for a single ticker with proper rate limiting."""
-        print(f"\nStarting data retrieval for ticker: {ticker}")
+        #print(f"\nStarting data retrieval for ticker: {ticker}")
         try:
             # First get basic price data using finagg's yfinance wrapper
             # This is more reliable than direct yfinance for price data
@@ -286,7 +286,7 @@ class MarketCapScreener:
             # Collect results as they complete
             for ticker, future in futures:
                 try:
-                    print(f"Waiting for result of ticker: {ticker}")
+                    #print(f"Waiting for result of ticker: {ticker}")
                     data = future.result()
                     if data:
                         results[ticker] = data
