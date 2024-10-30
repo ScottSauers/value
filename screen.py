@@ -74,47 +74,47 @@ class MarketCapScreener:
             """Get cache file path without date stamping."""
             return self.CACHE_DIR / f"{cache_type}.pkl"  # Think about date dependency
     
-        def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
-            """Get data for a single ticker with proper rate limiting."""
-            try:
-                # Use session for automatic rate limiting and caching
-                ticker_obj = yf.Ticker(ticker, session=self.session)
-                info = ticker_obj.info
-                hist = ticker_obj.history(period="5d")
-                
-                if not info:  # Only check if we got any info at all
-                    return None
-                    
-                latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
-                avg_price = hist['Close'].mean() if not hist.empty else latest_price
-                avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
-                
-                # Get market cap directly or calculate it
-                market_cap = info.get('marketCap')
-                if market_cap is None and latest_price is not None and info.get('sharesOutstanding') is not None:
-                    market_cap = latest_price * info['sharesOutstanding']
-                
-                # Only require market cap and price for basic validity
-                if market_cap is None or latest_price is None:
-                    print(f"  Skipped {ticker}: Missing required data - Market Cap: {market_cap}, Price: {latest_price}")
-                    return None
-                    
-                result = {
-                    'price': latest_price,
-                    'volume': info.get('volume', 0),
-                    'avg_volume': avg_volume,
-                    'shares_outstanding': info.get('sharesOutstanding'),
-                    'market_cap': market_cap,
-                    'high': info.get('dayHigh'),
-                    'low': info.get('dayLow'),
-                    'open': info.get('open')
-                }
-                
-                return result
-                
-            except Exception as e:
-                self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
+    def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Get data for a single ticker with proper rate limiting."""
+        try:
+            # Use session for automatic rate limiting and caching
+            ticker_obj = yf.Ticker(ticker, session=self.session)
+            info = ticker_obj.info
+            hist = ticker_obj.history(period="5d")
+            
+            if not info:  # Only check if we got any info at all
                 return None
+                
+            latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
+            avg_price = hist['Close'].mean() if not hist.empty else latest_price
+            avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
+            
+            # Get market cap directly or calculate it
+            market_cap = info.get('marketCap')
+            if market_cap is None and latest_price is not None and info.get('sharesOutstanding') is not None:
+                market_cap = latest_price * info['sharesOutstanding']
+            
+            # Only require market cap and price for basic validity
+            if market_cap is None or latest_price is None:
+                print(f"  Skipped {ticker}: Missing required data - Market Cap: {market_cap}, Price: {latest_price}")
+                return None
+                
+            result = {
+                'price': latest_price,
+                'volume': info.get('volume', 0),
+                'avg_volume': avg_volume,
+                'shares_outstanding': info.get('sharesOutstanding'),
+                'market_cap': market_cap,
+                'high': info.get('dayHigh'),
+                'low': info.get('dayLow'),
+                'open': info.get('open')
+            }
+            
+            return result
+            
+        except Exception as e:
+            self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
+            return None
 
     def _get_resume_path(self) -> Path:
         """Get path for resume data."""
@@ -214,42 +214,6 @@ class MarketCapScreener:
                     self.stats['errors']['processing'] += 1
                     
         return results
-
-    def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """Get data for a single ticker with proper rate limiting."""
-        try:
-            # Use session for automatic rate limiting and caching
-            ticker_obj = yf.Ticker(ticker, session=self.session)
-            info = ticker_obj.info
-            hist = ticker_obj.history(period="5d")
-            
-            if not info or hist.empty:
-                return None
-                
-            latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
-            avg_price = hist['Close'].mean() if not hist.empty else latest_price
-            avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
-            
-            result = {
-                'price': latest_price,
-                'volume': info.get('volume', 0),
-                'avg_volume': avg_volume,
-                'shares_outstanding': info.get('sharesOutstanding'),
-                'market_cap': info.get('marketCap'),
-                'high': info.get('dayHigh'),
-                'low': info.get('dayLow'),
-                'open': info.get('open')
-            }
-            
-            # Basic validation
-            if not all(v is not None for v in result.values()):
-                return None
-                
-            return result
-            
-        except Exception as e:
-            self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
-            return None
 
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Screen for small cap stocks with progressive caching."""
