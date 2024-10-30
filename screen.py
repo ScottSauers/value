@@ -144,13 +144,11 @@ class MarketCapScreener:
                 self.logger.debug(f"Failed to get yfinance data for {ticker}: {str(e)}")
                 print(f"yfinance data unavailable for {ticker}: {str(e)}")
                 
-            # If we still don't have market cap, estimate it using average volume as a proxy
-            # This is a rough estimation but better than nothing
+            # In _get_single_ticker_data:
             if result['market_cap'] is None:
-                # Estimate market cap using volume-based heuristic
-                result['market_cap'] = latest_price * (avg_volume * 30)  # Rough estimation
-                result['shares_outstanding'] = avg_volume * 30  # Estimated float
-                print(f"Using estimated market cap for {ticker} based on volume")
+                # Don't try to estimate - if we can't get real market cap data,
+                print(f"Unable to determine accurate market cap for {ticker}")
+                return None
                 
             return result
                 
