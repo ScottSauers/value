@@ -209,35 +209,6 @@ class MarketCapScreener:
             self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
             return None
 
-    def process_batch(self, batch_tickers: List[str]) -> List[Dict]:
-        """Process a batch of tickers in parallel with proper error handling."""
-        results = []
-        batch_results = self.get_stock_data_batch(batch_tickers)
-        
-        for ticker, data in batch_results.items():
-            if data and data['market_cap']:
-                results.append({
-                    'ticker': ticker,
-                    'price': data['price'],
-                    'shares_outstanding': data['shares_outstanding'],
-                    'market_cap': data['market_cap'],
-                    'volume': data['volume'],
-                    'avg_volume': data['avg_volume'],
-                    'high': data['high'],
-                    'low': data['low'],
-                    'open': data['open'],
-                    'last_updated': datetime.now().strftime('%Y-%m-%d')
-                })
-                self.stats['success'] += 1
-            self.stats['processed'] += 1
-            self.processed_tickers.add(ticker)
-        
-        if time.time() - self.stats['last_save'] > 30:
-            self.current_results.extend(results)
-            self._save_resume_state()
-            
-        return results
-
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Screen for small cap stocks with progressive caching."""
         # Try loading existing results first
@@ -310,7 +281,7 @@ class MarketCapScreener:
         return small_caps, all_stocks_df
 
     def validate_market_cap(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Validate market cap data with improved filtering."""
+        """Validate market cap data with less strict filtering."""
         if df.empty:
             return df
             
@@ -322,26 +293,44 @@ class MarketCapScreener:
             if col in validated.columns:
                 validated[col] = pd.to_numeric(validated[col], errors='coerce')
         
-        # Validation filters
+        # Basic validation filters
         validated = validated[
             (validated['market_cap'].notna()) &
             (validated['market_cap'] > 0) &
             (validated['market_cap'] < 1e15) &  # Trillion dollar cap
-            (validated['shares_outstanding'].notna()) &
-            (validated['shares_outstanding'] > 1000) &  # Minimum shares
-            (validated['shares_outstanding'] < 1e11) &  # Maximum shares
             (validated['price'].notna()) &
-            (validated['price'] > 0.01) &  # Penny stock minimum
-            (validated['price'] < 1e5)  # Maximum price
+            (validated['price'] > 0)  # Any positive price
         ].copy()
         
-        # Verify calculations
-        validated['calc_market_cap'] = validated['price'] * validated['shares_outstanding']
-        validated = validated[
-            (validated['calc_market_cap'] / validated['market_cap']).between(0.9, 1.1)
-        ]
+        # Log validation stats
+        self.logger.info(f"Validated entries: {len(validated)} out of {len(df)}")
         
         return validated
+    
+    def process_batch(self, batch_tickers: List[str]) -> List[Dict]:
+        """Process batch with better error logging."""
+        results = []
+        batch_results = self.get_stock_data_batch(batch_tickers)
+        
+        for ticker, data in batch_results.items():
+            if data and data.get('market_cap'):  # More permissive check
+                results.append({
+                    'ticker': ticker,
+                    **data,
+                    'last_updated': datetime.now().strftime('%Y-%m-%d')
+                })
+                self.stats['success'] += 1
+                self.logger.debug(f"Processed {ticker}: market cap {data['market_cap']}")
+            else:
+                self.logger.debug(f"Skipped {ticker}: invalid data")
+            self.stats['processed'] += 1
+            self.processed_tickers.add(ticker)
+        
+        if time.time() - self.stats['last_save'] > 30:
+            self.current_results.extend(results)
+            self._save_resume_state()
+            
+        return results
 
     def format_results(self, df: pd.DataFrame) -> pd.DataFrame:
         """Format results for display."""
