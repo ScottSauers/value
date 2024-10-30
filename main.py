@@ -2,7 +2,7 @@
 
 import sys
 import logging
-from url_finder import SECFieldExtractor
+from finder import SECFieldExtractor
 import parser
 
 # Configure logging (ensure it does not duplicate if already configured in modules)
