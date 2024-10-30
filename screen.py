@@ -434,7 +434,7 @@ class MarketCapScreener:
         validated = validated[
             (validated['market_cap'].notna()) &
             (validated['market_cap'] > 0) &
-            (validated['market_cap'] < 1e15) &  # Trillion dollar cap
+            (validated['market_cap'] < 1e16) &  # Dollar cap
             (validated['price'].notna()) &
             (validated['price'] > 0)  # Any positive price
         ].copy()
