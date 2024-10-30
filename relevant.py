@@ -15,7 +15,7 @@ from bs4 import XMLParsedAsHTMLWarning
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, format='%(levelname)s:%(name)s:%(message)s')
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -44,58 +44,50 @@ def preprocess_table(df):
         # Ensure column names are strings
         df.columns = [str(col) for col in df.columns]
 
-        # Check if all column names start with 'column_'
-        if all(col.startswith('column_') for col in df.columns):
-            # Check if first row has mostly non-numeric data
-            first_row = df.iloc[0]
-            non_numeric_count = first_row.apply(
-                lambda x: not re.match(r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$', str(x).replace(' ', ''))
-            ).sum()
+        # Define header keywords to identify potential header rows
+        header_keywords = ['year', 'month', 'period', 'date', 'fiscal', 'quarter', 'type', 'item', 'line', 'description']
 
-            if non_numeric_count > len(df.columns) / 2:
-                logger.debug("Assuming first row contains headers.")
-                # Assume the first row is header
-                new_header = df.iloc[0]
-                df = df[1:]
-                df.columns = [clean_text(str(col)) for col in new_header]
-                logger.debug(f"Updated columns from first row: {df.columns.tolist()}")
-            else:
-                logger.debug("First row is likely data, keeping generic column names.")
+        # Initialize headers list
+        header_rows = []
+
+        # Iterate through the first 6 rows to find header rows
+        for i in range(min(6, len(df))):
+            row = df.iloc[i].astype(str).str.lower()
+            # Check if the row contains any header keywords
+            if row.str.contains('|'.join(header_keywords), regex=True).any():
+                header_rows.append(row)
+
+        if header_rows:
+            # Combine multiple header rows into a single header by concatenation
+            combined_header = header_rows[0].fillna('')
+            for additional_header in header_rows[1:]:
+                combined_header = combined_header + ' ' + additional_header.fillna('')
+
+            # Clean and format the combined header
+            combined_header = combined_header.apply(clean_text).str.replace(r'\s+', ' ', regex=True)
+
+            # Assign the combined header to the DataFrame
+            df.columns = combined_header
+
+            # Drop the header rows from the DataFrame
+            df = df.iloc[len(header_rows):].reset_index(drop=True)
+
+            logger.debug("Combined multi-level headers and set as column names.")
         else:
-            # Define additional keywords to identify header rows
-            header_keywords = ['Year', 'Month', 'Period', 'Date', 'Fiscal', 'Quarter', 'Type']
-
-            # Initialize headers list
-            headers = []
-
-            # Iterate through the first 5 rows to find header rows
-            for i in range(min(5, len(df))):
-                row = df.iloc[i]
-                if row.astype(str).str.contains('|'.join(header_keywords), case=False, regex=True).any():
-                    headers.append(row)
-
-            if headers:
-                # Combine headers vertically
-                header = pd.concat(headers).fillna('')
-                # Create meaningful column names using clean_text to ensure strings
-                columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
-
-                # Check if header length matches df columns
-                if len(columns) == len(df.columns):
-                    df.columns = columns  # Set new headers if they match
-                    df = df.iloc[len(headers):]  # Drop header rows
-                    logger.debug("Headers matched and set successfully.")
-                else:
-                    # Fallback: Set default column names if there's a mismatch
-                    df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
-                    logger.debug("Header rows found but column count mismatch. Assigned generic column names.")
+            # If no headers detected, attempt to use the first row as header
+            first_row = df.iloc[0].astype(str).str.lower()
+            if first_row.str.contains('|'.join(header_keywords), regex=True).any():
+                combined_header = first_row.apply(clean_text).str.replace(r'\s+', ' ', regex=True)
+                df = df[1:].reset_index(drop=True)
+                df.columns = combined_header
+                logger.debug("Assigned first row as header.")
             else:
-                # If no headers detected, assign default column names
+                # Assign default column names if no headers detected
                 df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
                 logger.debug("No header rows detected. Assigned generic column names.")
 
-        # Clean column names
-        df.columns = [clean_text(str(col)).lower() for col in df.columns]
+        # Further clean column names
+        df.columns = [re.sub(r'\s+', ' ', col).strip().lower() for col in df.columns]
 
         # Reset index after dropping rows
         df = df.reset_index(drop=True)
@@ -119,7 +111,7 @@ def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, An
         if not label or label in ['nan', 'none', '']:
             return None
 
-        # Look for value and corresponding header
+        # Initialize value and column name
         value = None
         column_name = None
 
@@ -177,7 +169,9 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
             for section_name, items in sections.items():
                 for item in items:
                     column_name = item.get('column_name', 'N/A')
-                    f.write(f"{item['label']}\t{item['value']}\t{column_name}\t{section_name}\n")
+                    # Capitalize the first letter of the label for consistency
+                    label = item['label'].capitalize()
+                    f.write(f"{label}\t{item['value']}\t{column_name}\t{section_name}\n")
         logger.debug("Data successfully saved to TSV.")
     except Exception as e:
         logger.error(f"Error saving TSV: {e}")
@@ -263,20 +257,15 @@ class SECFieldExtractor:
 
             logger.info(f"Found {len(tables)} tables in the document.")
 
-            # Print the first two raw tables for inspection
+            # Optionally, print the first few tables for debugging
             for idx, df in enumerate(tables[:10], start=1):
                 print(f"\n--- Raw Table {idx} ---")
-                
-                # Print the first five rows
                 for row_num in range(min(5, len(df))):
-                    row = df.iloc[row_num].tolist()  # Convert row to list
+                    row = df.iloc[row_num].tolist()
                     print(f"Row {row_num + 1}: {row}")
-                
-                # Print the last row if the table has more than 5 rows
                 if len(df) > 5:
-                    last_row = df.iloc[-1].tolist()  # Convert last row to list
+                    last_row = df.iloc[-1].tolist()
                     print(f"Last Row: {last_row}")
-                
                 print("----------------------\n")
 
             for idx, df in enumerate(tables, start=1):
@@ -289,11 +278,11 @@ class SECFieldExtractor:
                 # Identify the table type based on content
                 table_text = df.to_string().lower()
 
-                income_keywords = ['income', 'revenue', 'net income', 'operating income']
+                income_keywords = ['income', 'revenue', 'net income', 'operating income', 'gross margin']
                 balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities',
-                                    "shareholders’ equity", "shareholders' equity"]
+                                    "shareholders’ equity", "shareholders' equity", 'balance sheet']
                 cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities',
-                                      'financing activities', 'net cash']
+                                      'financing activities', 'net cash', 'cash generated']
 
                 if any(keyword in table_text for keyword in income_keywords):
                     section = 'Income Statement'
@@ -308,8 +297,8 @@ class SECFieldExtractor:
 
                 # Improved row parsing with header context
                 for row_idx, row in df.iterrows():
-                    # Skip rows that are likely sub-headers
-                    if row.astype(str).str.contains('Year|Month|Period|Date', case=False).any():
+                    # Skip rows that are likely sub-headers or notes
+                    if row.astype(str).str.contains('year|month|period|date|item|line|description', case=False).any():
                         continue
 
                     row_data = parse_table_row(row.tolist(), df.columns.tolist())
