@@ -30,7 +30,7 @@ class MarketCapScreener:
     """Enhanced screener with progressive caching and rate limiting."""
     
     CACHE_DIR = Path("cache")
-    BATCH_SIZE = 200  # Smaller batches for better reliability
+    BATCH_SIZE = 2  # Smaller batches for better reliability
     
     def __init__(self, max_workers: int = 10, cache_expiry_days: int = 1):
         """Initialize the screener with improved caching and rate limiting."""
