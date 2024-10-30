@@ -1,7 +1,7 @@
 # parser.py
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import re
 import pandas as pd
 from io import StringIO
@@ -280,11 +280,14 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: Optional[str] = None):
         else:
             filing_date_formatted = filing_date.replace('/', '-').replace('.', '-')
 
-        filename = f"{cik}_{form_type}_{filing_date_formatted}.tsv"
+        # Sanitize form_type to remove any characters that might not be suitable for filenames
+        form_type_sanitized = re.sub(r'[^\w\-]', '_', form_type)
+
+        filename = f"{cik}_{form_type_sanitized}_{filing_date_formatted}.tsv"
 
         logger.debug(f"Saving data to {filename}")
 
-        with open(filename, 'w') as f:
+        with open(filename, 'w', encoding='utf-8') as f:
             # Write headers
             f.write("Tag\tValue\tColumn Name\tSection\tForm Type\tFiling Date\n")
 
@@ -304,8 +307,12 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: Optional[str] = None):
             for section_name, items in sections.items():
                 for item in items:
                     column_name = item.get('column_name', 'N/A')
+                    # Capitalize the first letter of the label for consistency
                     label = item['label']
                     value = item['value']
+                    # Retrieve form type and filing date from company_info
+                    form_type = company_info.get('form_type', 'N/A')
+                    filing_date = company_info.get('filing_date_actual', 'N/A')
                     f.write(f"{label}\t{value}\t{column_name}\t{section_name}\t{form_type}\t{filing_date}\n")
 
         logger.debug("Data successfully saved to TSV.")
