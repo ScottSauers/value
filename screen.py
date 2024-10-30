@@ -180,8 +180,97 @@ class MarketCapScreener:
         return validated
 
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Screen for small caps with improved validation."""
-        [Previous implementation remains similar, but add validate_market_cap() call before filtering]
+        """
+        Screen for small cap stocks with caching and comprehensive error tracking.
+        
+        Returns:
+            Tuple of (small_caps_df, all_stocks_df)
+        """
+        # Try to load from cache
+        cached_data = self._load_cache('market_caps')
+        if cached_data is not None:
+            print("Using cached market cap data...")
+            all_stocks_df = cached_data
+            small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
+            return small_caps, all_stocks_df
+        
+        # Get exchange-listed companies
+        print("\nFetching exchange-listed companies...")
+        exchange_df = self.get_exchange_listed_companies()
+        total_companies = len(exchange_df)
+        print(f"Found {total_companies} companies on major exchanges")
+        
+        # Process companies in parallel
+        print("\nCalculating market caps...")
+        results = []
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_ticker = {
+                executor.submit(self.process_company, ticker): ticker 
+                for ticker in exchange_df['ticker']
+            }
+            
+            with tqdm(total=total_companies, desc="Processing") as pbar:
+                for future in as_completed(future_to_ticker):
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                    pbar.update(1)
+        
+        if not results:
+            return pd.DataFrame(), pd.DataFrame()
+        
+        # Create results dataframe
+        market_caps_df = pd.DataFrame(results)
+        
+        # Merge with exchange info
+        all_stocks_df = pd.merge(market_caps_df, exchange_df, on='ticker', how='inner')
+        
+        # Cache all stocks data
+        self._save_cache(all_stocks_df, 'market_caps')
+        
+        # Filter for small caps
+        small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
+        
+        # Add millions column for display
+        for df in [small_caps, all_stocks_df]:
+            df['market_cap_millions'] = df['market_cap'] / 1_000_000
+        
+        # Sort by market cap
+        small_caps = small_caps.sort_values('market_cap', ascending=True)
+        
+        # Print completion statistics
+        self._print_completion_stats()
+        
+        return small_caps, all_stocks_df
+
+    def _print_completion_stats(self):
+        """Print detailed completion statistics."""
+        print("\nProcessing Statistics:")
+        print(f"Total companies processed: {self.processed_count}")
+        print(f"Successfully processed: {self.success_count} ({(self.success_count/self.processed_count*100):.1f}%)")
+        print("\nError Breakdown:")
+        for error_type, count in self.error_counts.items():
+            if count > 0:
+                percentage = (count / self.processed_count) * 100
+                print(f"- {error_type}: {count} ({percentage:.1f}%)")
+
+def format_results(df: pd.DataFrame) -> pd.DataFrame:
+    """Format results for display."""
+    display_df = df.copy()
+    
+    # Format numeric columns
+    display_df['market_cap_millions'] = display_df['market_cap_millions'].round(2)
+    display_df['price'] = display_df['price'].round(2)
+    display_df['shares_outstanding'] = display_df['shares_outstanding'].round(0)
+    
+    # Select and rename columns
+    cols = [
+        'ticker', 'name', 'exchange', 'market_cap_millions', 
+        'price', 'shares_outstanding', 'last_updated'
+    ]
+    
+    return display_df[cols]
 
 def main():
     """Main execution function."""
