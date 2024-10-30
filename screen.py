@@ -30,7 +30,7 @@ class MarketCapScreener:
     """Enhanced screener with progressive caching and rate limiting."""
     
     CACHE_DIR = Path("cache")
-    BATCH_SIZE = 20  # Smaller batches for better reliability
+    BATCH_SIZE = 200  # Smaller batches for better reliability
     
     def __init__(self, max_workers: int = 10, cache_expiry_days: int = 1):
         """Initialize the screener with improved caching and rate limiting."""
@@ -220,7 +220,7 @@ class MarketCapScreener:
             self.processed_tickers.add(ticker)
             
         # Save progress every few batches
-        if time.time() - self.stats['last_save'] > 300:  # 5 minutes
+        if time.time() - self.stats['last_save'] > 60:
             self.current_results.extend(results)
             self._save_resume_state()
             
