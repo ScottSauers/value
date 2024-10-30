@@ -264,7 +264,7 @@ class SECFieldExtractor:
             logger.info(f"Found {len(tables)} tables in the document.")
 
             # Print the first two raw tables for inspection
-            for idx, df in enumerate(tables[:2], start=1):
+            for idx, df in enumerate(tables[:10], start=1):
                 print(f"\n--- Raw Table {idx} ---")
                 
                 # Print the first five rows
