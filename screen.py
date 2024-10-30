@@ -310,8 +310,8 @@ class MarketCapScreener:
                     small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
                     if not small_caps.empty:
                         return small_caps, all_stocks_df
-                except Exception as e:
-                    self.logger.warning(f"Cache validation failed: {str(e)}")
+        except Exception as e:
+            self.logger.warning(f"Cache validation failed: {str(e)}")
         
         # Get exchange-listed companies
         print("\nFetching exchange-listed companies...")
