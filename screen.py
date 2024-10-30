@@ -32,8 +32,8 @@ class MarketCapScreener:
     CACHE_DIR = Path("cache")
     BATCH_SIZE = 2  # Smaller batches for better reliability
     
-    def __init__(self, max_workers: int = 10, cache_expiry_days: int = 1):
-        """Initialize the screener with improved caching and rate limiting."""
+    def __init__(self, max_workers: int = 20, cache_expiry_days: int = 1):
+        """Initialize with better parallelization settings."""
         self.max_workers = max_workers
         self.cache_expiry_days = cache_expiry_days
         self.stats = {
@@ -46,9 +46,9 @@ class MarketCapScreener:
         # Create cache directory
         self.CACHE_DIR.mkdir(exist_ok=True)
         
-        # Setup better session with caching and rate limiting
+        # Setup better session with increased rate limits
         self.session = CachedLimiterSession(
-            limiter=Limiter(RequestRate(2, Duration.SECOND*5)),  # max 2 requests per 5 seconds
+            limiter=Limiter(RequestRate(10, Duration.SECOND)),  # 10 requests/sec
             bucket_class=MemoryQueueBucket,
             backend=SQLiteCache("yfinance.cache")
         )
@@ -68,6 +68,8 @@ class MarketCapScreener:
         self.processed_tickers = set()
         self.current_results = []
         
+        self.BATCH_SIZE = 50  # Process more tickers at once
+
     def _get_cache_path(self, cache_type: str) -> Path:
         """Get cache file path with date stamping."""
         return self.CACHE_DIR / f"{cache_type}_{datetime.now().strftime('%Y%m%d')}.pkl"
@@ -150,54 +152,65 @@ class MarketCapScreener:
             raise
 
     def get_stock_data_batch(self, tickers: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Get stock data for multiple tickers efficiently."""
+        """Get stock data for multiple tickers with true parallelization."""
         results = {}
+        futures = []
         
-        try:
-            # Use yfinance's built-in batch processing
-            tickers_str = ' '.join(tickers)
-            tickers_data = yf.Tickers(tickers_str, session=self.session)
-            
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit each ticker for parallel processing
             for ticker in tickers:
+                futures.append((ticker, executor.submit(self._get_single_ticker_data, ticker)))
+                
+            # Collect results as they complete
+            for ticker, future in futures:
                 try:
-                    info = tickers_data.tickers[ticker].info
-                    hist = tickers_data.tickers[ticker].history(period="5d")
-                    
-                    if not info or hist.empty:
-                        continue
-                        
-                    latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
-                    avg_price = hist['Close'].mean() if not hist.empty else latest_price
-                    avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
-                    
-                    results[ticker] = {
-                        'price': latest_price,
-                        'volume': info.get('volume', 0),
-                        'avg_volume': avg_volume,
-                        'shares_outstanding': info.get('sharesOutstanding'),
-                        'market_cap': info.get('marketCap'),
-                        'high': info.get('dayHigh'),
-                        'low': info.get('dayLow'),
-                        'open': info.get('open')
-                    }
-                    
-                    # Basic validation
-                    if not all(v is not None for v in results[ticker].values()):
-                        del results[ticker]
-                        
+                    data = future.result()
+                    if data:
+                        results[ticker] = data
                 except Exception as e:
                     self.logger.debug(f"Error processing {ticker}: {str(e)}")
                     self.stats['errors']['processing'] += 1
-                    continue
                     
-        except Exception as e:
-            self.logger.warning(f"Batch processing failed: {str(e)}")
-            self.stats['errors']['batch'] += 1
-            
         return results
 
+        def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Get data for a single ticker with proper rate limiting."""
+            try:
+                # Use session for automatic rate limiting and caching
+                ticker_obj = yf.Ticker(ticker, session=self.session)
+                info = ticker_obj.info
+                hist = ticker_obj.history(period="5d")
+                
+                if not info or hist.empty:
+                    return None
+                    
+                latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
+                avg_price = hist['Close'].mean() if not hist.empty else latest_price
+                avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
+                
+                result = {
+                    'price': latest_price,
+                    'volume': info.get('volume', 0),
+                    'avg_volume': avg_volume,
+                    'shares_outstanding': info.get('sharesOutstanding'),
+                    'market_cap': info.get('marketCap'),
+                    'high': info.get('dayHigh'),
+                    'low': info.get('dayLow'),
+                    'open': info.get('open')
+                }
+                
+                # Basic validation
+                if not all(v is not None for v in result.values()):
+                    return None
+                    
+                return result
+                
+            except Exception as e:
+                self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
+                return None
+
     def process_batch(self, batch_tickers: List[str]) -> List[Dict]:
-        """Process a batch of tickers with error handling."""
+        """Process a batch of tickers in parallel with proper error handling."""
         results = []
         batch_results = self.get_stock_data_batch(batch_tickers)
         
@@ -218,9 +231,8 @@ class MarketCapScreener:
                 self.stats['success'] += 1
             self.stats['processed'] += 1
             self.processed_tickers.add(ticker)
-            
-        # Save progress every few batches
-        if time.time() - self.stats['last_save'] > 60:
+        
+        if time.time() - self.stats['last_save'] > 30:
             self.current_results.extend(results)
             self._save_resume_state()
             
