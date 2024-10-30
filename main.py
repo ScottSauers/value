@@ -17,7 +17,7 @@ def main():
         print("  python main.py 320193 MyCompany your.email@example.com 2")
         sys.exit(1)
 
-    identifier = sys.argv[1]
+    identifier = sys.argv[1]  # This can be either CIK or Ticker
     company_name = sys.argv[2]
     email = sys.argv[3]
 
@@ -34,9 +34,8 @@ def main():
     # Define form types to fetch: 10-K (annual) and 10-Q (quarterly)
     form_types = ["10-K", "10-Q"]
 
-    # Since 10-K is annual, and 10-Q is quarterly, adjust the limit accordingly
-    # For example, for 4 quarters, you might expect 1 10-K and 3 10-Q filings
-    # To ensure enough filings, set the limit to number_of_quarters + 1 per form type
+    # Adjust the limit to ensure enough filings, set the limit to number_of_quarters + 1 per form type
+    # Fix later
     limit_per_form = number_of_quarters + 1
 
     fetched_data = extractor.get_latest_fields(identifier, form_types, limit_per_form)
@@ -62,6 +61,7 @@ def main():
             financial_data['company_info'] = {
                 'name': company_info.name,
                 'cik': company_info.cik,
+                'ticker': identifier,
                 'filing_date': company_info.filing_date,
                 'report_date': company_info.report_date,
                 'form_type': form_type,
@@ -75,9 +75,9 @@ def main():
             logger.error("No financial data extracted from the filings.")
             sys.exit(1)
 
-        # Save all financial data to unique TSV files
+        # Save each financial data entry to a unique TSV file
         for financial_data in all_financial_data:
-            parser.save_fields_to_tsv(financial_data)
+            parser.save_fields_to_tsv(financial_data, ticker=identifier)
 
         logger.info(f"Data extraction complete. Results saved as separate TSV files.")
 
