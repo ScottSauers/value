@@ -174,7 +174,7 @@ class MarketCapScreener:
         return results
 
         def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """Get data for a single ticker with proper rate limiting."""
+            """Get data for a single ticker with proper rate limiting."""
             try:
                 # Use session for automatic rate limiting and caching
                 ticker_obj = yf.Ticker(ticker, session=self.session)
