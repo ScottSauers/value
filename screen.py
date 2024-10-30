@@ -90,15 +90,12 @@ class MarketCapScreener:
         """Get data for a single ticker with proper rate limiting."""
         print(f"\nStarting data retrieval for ticker: {ticker}")
         try:
-            # Add small delay between requests
-            #print("Sleeping for 0.1 seconds to respect rate limits...")
             time.sleep(0.1)
             
             # Use the finagg API for basic price data
             print(f"Fetching price data for {ticker} using finagg...")
             try:
                 price_data = finagg.yfinance.api.get(ticker, period="5d")
-                #print(f"Price data fetched for {ticker}: {price_data.head()}")
                 if price_data.empty:
                     print(f"Price data for {ticker} is empty. Skipping.")
                     return None
@@ -111,41 +108,52 @@ class MarketCapScreener:
                 print(f"Exception occurred while fetching finagg data for {ticker}: {str(e)}")
                 return None
                 
-            # Use yfinance for additional info
-            print(f"Fetching additional info for {ticker} using yfinance...")
-            ticker_obj = yf.Ticker(ticker, session=self.session)
-            info = ticker_obj.info
-            print(f"Info fetched for {ticker}: {info.keys()}")
-            
-            if not info:
-                print(f"No info retrieved for {ticker}. Skipping.")
-                return None
-                
-            # Get market cap directly or calculate it
-            market_cap = info.get('marketCap')
-            print(f"Market Cap from info for {ticker}: {market_cap}")
-            if market_cap is None and latest_price is not None and info.get('sharesOutstanding') is not None:
-                market_cap = latest_price * info['sharesOutstanding']
-                print(f"Calculated Market Cap for {ticker}: {market_cap}")
-            
-            # Only require market cap and price for basic validity
-            if market_cap is None or latest_price is None:
-                print(f"  Skipped {ticker}: Missing required data - Market Cap: {market_cap}, Price: {latest_price}")
-                return None
-                
+            # Initialize result with finagg data
             result = {
                 'ticker': ticker,
                 'price': latest_price,
-                'volume': avg_volume,  # Use averaged volume from price data
-                'shares_outstanding': info.get('sharesOutstanding'),
-                'market_cap': market_cap,
+                'volume': avg_volume,
+                'shares_outstanding': None,  # Will try to get from yfinance
+                'market_cap': None,  # Will calculate after trying yfinance
                 'high': price_data['high'].iloc[-1] if not price_data.empty else None,
                 'low': price_data['low'].iloc[-1] if not price_data.empty else None,
                 'open': price_data['open'].iloc[-1] if not price_data.empty else None
             }
-            print(f"Data retrieved for {ticker}: {result}")
+                
+            # Try to get additional data from yfinance, but don't fail if unavailable
+            try:
+                print(f"Fetching additional info for {ticker} using yfinance...")
+                ticker_obj = yf.Ticker(ticker, session=self.session)
+                info = ticker_obj.info
+                
+                if info:
+                    # If we have shares outstanding, we can calculate market cap
+                    shares = info.get('sharesOutstanding')
+                    if shares:
+                        result['shares_outstanding'] = shares
+                        result['market_cap'] = latest_price * shares
+                    # If not, try to get market cap directly
+                    elif info.get('marketCap'):
+                        result['market_cap'] = info['marketCap']
+                        # Estimate shares outstanding
+                        if latest_price > 0:
+                            result['shares_outstanding'] = info['marketCap'] / latest_price
+                
+            except Exception as e:
+                # Log the error but continue with the data we have
+                self.logger.debug(f"Failed to get yfinance data for {ticker}: {str(e)}")
+                print(f"yfinance data unavailable for {ticker}: {str(e)}")
+                
+            # If we still don't have market cap, estimate it using average volume as a proxy
+            # This is a rough estimation but better than nothing
+            if result['market_cap'] is None:
+                # Estimate market cap using volume-based heuristic
+                result['market_cap'] = latest_price * (avg_volume * 30)  # Rough estimation
+                result['shares_outstanding'] = avg_volume * 30  # Estimated float
+                print(f"Using estimated market cap for {ticker} based on volume")
+                
             return result
-            
+                
         except Exception as e:
             self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
             print(f"Exception occurred while processing {ticker}: {str(e)}")
