@@ -118,13 +118,15 @@ class MarketCapScreener:
     
                 # Method 1: Direct market cap
                 if 'marketCap' in info:
+                    print(f"Market Cap: {info['marketCap']}")
                     market_cap = info['marketCap']
                     shares_outstanding = market_cap / latest_price if latest_price > 0 else None
-    
+                
                 # Method 2: Calculate from shares
                 if market_cap is None and 'sharesOutstanding' in info:
                     shares_outstanding = info['sharesOutstanding']
                     market_cap = shares_outstanding * latest_price
+                    print(f"Market Cap: {market_cap}")
     
                 # If we still don't have market cap data, skip this ticker
                 if market_cap is None or market_cap <= 0:
