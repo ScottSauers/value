@@ -579,6 +579,11 @@ class MarketCapScreener:
             print(f"Error clearing caches: {e}")
     
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--clear-cache', action='store_true', help='Clear all caches before running')
+    args = parser.parse_args()
+    
     print("\n=== MarketCapScreener Execution Started ===")
     start_time = time.time()
     
@@ -586,8 +591,9 @@ def main():
         print("\nCreating MarketCapScreener instance...")
         screener = MarketCapScreener(max_workers=10, use_cache=True)
         
-        print("\nClearing all caches for fresh data...")
-        screener.clear_caches()
+        if args.clear_cache:
+            print("\nClearing all caches for fresh data...")
+            screener.clear_caches()
         
         try:
             print("\nStarting screening for small cap stocks...")
