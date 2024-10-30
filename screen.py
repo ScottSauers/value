@@ -210,15 +210,24 @@ class MarketCapScreener:
             return None
 
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Screen for small cap stocks with progressive caching."""
-        # Try loading existing results first
-        cached_data = self._load_cache('market_caps')
-        if cached_data is not None and not cached_data.empty:
-            print("Using cached market cap data...")
-            all_stocks_df = self.validate_market_cap(cached_data)
-            small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
-            if not small_caps.empty:
-                return small_caps, all_stocks_df
+            """Screen for small cap stocks with progressive caching."""
+            # Try loading existing results first
+            cached_data = self._load_cache('market_caps')
+            print(f"\nAttempting to load cache...")
+            if cached_data is not None:
+                print(f"Cache found with {len(cached_data)} entries")
+                if not cached_data.empty:
+                    print("Using cached market cap data...")
+                    all_stocks_df = self.validate_market_cap(cached_data)
+                    print(f"After validation: {len(all_stocks_df)} entries")
+                    small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
+                    print(f"Found {len(small_caps)} companies under {max_market_cap:,} market cap")
+                    if not small_caps.empty:
+                        return small_caps, all_stocks_df
+                else:
+                    print("Cached data was empty")
+            else:
+                print("No valid cache found")
         
         # Check for resume data
         if self._load_resume_state():
@@ -310,26 +319,35 @@ class MarketCapScreener:
     def process_batch(self, batch_tickers: List[str]) -> List[Dict]:
         """Process batch with better error logging."""
         results = []
+        print(f"\nProcessing batch of {len(batch_tickers)} tickers...")
         batch_results = self.get_stock_data_batch(batch_tickers)
-        
+        print(f"Got results for {len(batch_results)} tickers")
+
         for ticker, data in batch_results.items():
-            if data and data.get('market_cap'):  # More permissive check
-                results.append({
-                    'ticker': ticker,
-                    **data,
-                    'last_updated': datetime.now().strftime('%Y-%m-%d')
-                })
-                self.stats['success'] += 1
-                self.logger.debug(f"Processed {ticker}: market cap {data['market_cap']}")
+            print(f"\nProcessing {ticker}:")
+            if data:
+                market_cap = data.get('market_cap')
+                if market_cap:
+                    print(f"  Market Cap: ${market_cap:,.2f}")
+                    results.append({
+                        'ticker': ticker,
+                        **data,
+                        'last_updated': datetime.now().strftime('%Y-%m-%d')
+                    })
+                    self.stats['success'] += 1
+                    self.logger.debug(f"Processed {ticker}: market cap {data['market_cap']}")
+                else:
+                    print(f"  Skipped: No market cap data")
             else:
-                self.logger.debug(f"Skipped {ticker}: invalid data")
+                print(f"  Skipped: No valid data")
             self.stats['processed'] += 1
             self.processed_tickers.add(ticker)
-        
+
         if time.time() - self.stats['last_save'] > 30:
+            print(f"\nSaving {len(results)} results to cache...")
             self.current_results.extend(results)
             self._save_resume_state()
-            
+
         return results
 
     def format_results(self, df: pd.DataFrame) -> pd.DataFrame:
