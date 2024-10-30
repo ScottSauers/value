@@ -167,37 +167,50 @@ class MarketCapScreener:
             return None
 
     def get_shares_data(self, ticker: str) -> Optional[float]:
-        """Get shares outstanding from multiple sources."""
+        """Get shares outstanding from multiple sources with better error handling."""
         try:
             # Try yfinance first for shares data
             import yfinance as yf
-            ticker_obj = yf.Ticker(ticker)
-            shares = ticker_obj.info.get('sharesOutstanding')
-            if shares:
-                return float(shares)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                ticker_obj = yf.Ticker(ticker)
+                try:
+                    shares = ticker_obj.info.get('sharesOutstanding')
+                    if shares and shares > 0:
+                        return float(shares)
+                except:
+                    shares = ticker_obj.info.get('marketCap')
+                    price = ticker_obj.info.get('currentPrice')
+                    if shares and price and price > 0:
+                        return float(shares / price)
         except:
             pass
-            
-        # Fallback to SEC data
+
+        # Fallback to SEC data with better connection handling
+        used_tags = set()
         for tag in self.SHARES_OUTSTANDING_TAGS:
-            try:
-                shares_data = finagg.sec.api.company_concept.get(
-                    tag,
-                    ticker=ticker,
-                    units="shares"
-                )
-                
-                if not shares_data.empty:
-                    shares_data = shares_data.sort_values('end', ascending=False)
-                    shares = float(shares_data['value'].iloc[0])
-                    if shares > 0:
-                        return shares
-                        
-            except Exception as e:
-                if "Connection pool is full" in str(e):
-                    time.sleep(0.1)
+            if tag in used_tags:
                 continue
-                
+            used_tags.add(tag)
+            
+            try:
+                with self.session.get(
+                    f'https://data.sec.gov/api/xbrl/companyconcept/CIK{ticker}/{tag}.json',
+                    timeout=5
+                ) as response:
+                    if response.status_code == 200:
+                        data = response.json()
+                        if 'units' in data and 'shares' in data['units']:
+                            shares_data = pd.DataFrame(data['units']['shares'])
+                            if not shares_data.empty:
+                                shares_data = shares_data.sort_values('end', ascending=False)
+                                shares = float(shares_data['val'].iloc[0])
+                                if shares > 0:
+                                    return shares
+                    time.sleep(0.1)  # Rate limiting
+            except:
+                continue
+
         self.error_counts['shares_fetch_failed'] += 1
         return None
 
@@ -249,24 +262,39 @@ class MarketCapScreener:
             return None
 
     def format_results(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Format results with additional metrics."""
+        """Format results with better numeric handling."""
+        if df.empty:
+            return df
+            
         display_df = df.copy()
         
-        # Format numeric columns
-        display_df['market_cap_millions'] = display_df['market_cap_millions'].round(2)
-        display_df['price'] = display_df['price'].round(2)
-        display_df['shares_outstanding'] = display_df['shares_outstanding'].round(0)
-        display_df['avg_volume'] = display_df['avg_volume'].round(0)
-        display_df['daily_volume_usd'] = (display_df['daily_volume_usd'] / 1_000_000).round(2)
-        display_df['avg_volume_usd'] = (display_df['avg_volume_usd'] / 1_000_000).round(2)
-        
-        # Select and order columns
-        cols = [
-            'ticker', 'name', 'exchange', 
+        # Ensure numeric columns
+        numeric_cols = [
             'market_cap_millions', 'price', 'shares_outstanding',
             'volume', 'avg_volume', 'daily_volume_usd', 'avg_volume_usd',
-            'high', 'low', 'open', 'last_updated'
+            'high', 'low', 'open'
         ]
+        
+        for col in numeric_cols:
+            if col in display_df.columns:
+                display_df[col] = pd.to_numeric(display_df[col], errors='coerce')
+        
+        # Format numbers
+        if 'market_cap_millions' in display_df:
+            display_df['market_cap_millions'] = display_df['market_cap_millions'].round(2)
+        if 'price' in display_df:
+            display_df['price'] = display_df['price'].round(2)
+        if 'shares_outstanding' in display_df:
+            display_df['shares_outstanding'] = display_df['shares_outstanding'].round(0)
+        
+        # Select columns that exist
+        base_cols = [
+            'ticker', 'name', 'exchange', 'market_cap_millions', 
+            'price', 'shares_outstanding', 'volume', 'avg_volume',
+            'daily_volume_usd', 'avg_volume_usd', 'high', 'low', 'open',
+            'last_updated'
+        ]
+        cols = [col for col in base_cols if col in display_df.columns]
         
         return display_df[cols]
 
@@ -287,19 +315,19 @@ class MarketCapScreener:
         return validated
 
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Screen for small cap stocks with caching and comprehensive error tracking.
-        
-        Returns:
-            Tuple of (small_caps_df, all_stocks_df)
-        """
-        # Try to load from cache
-        cached_data = self._load_cache('market_caps')
-        if cached_data is not None:
-            print("Using cached market cap data...")
-            all_stocks_df = cached_data
-            small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
-            return small_caps, all_stocks_df
+        """Screen for small cap stocks with improved caching and validation."""
+        try:
+            # Try to load from cache
+            cached_data = self._load_cache('market_caps')
+            if cached_data is not None and not cached_data.empty:
+                print("Using cached market cap data...")
+                try:
+                    all_stocks_df = self.validate_market_cap(cached_data)
+                    small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
+                    if not small_caps.empty:
+                        return small_caps, all_stocks_df
+                except Exception as e:
+                    self.logger.warning(f"Cache validation failed: {str(e)}")
         
         # Get exchange-listed companies
         print("\nFetching exchange-listed companies...")
@@ -333,24 +361,66 @@ class MarketCapScreener:
         # Merge with exchange info
         all_stocks_df = pd.merge(market_caps_df, exchange_df, on='ticker', how='inner')
         
-        # Cache all stocks data
-        self._save_cache(all_stocks_df, 'market_caps')
+        # Validate data
+        all_stocks_df = self.validate_market_cap(all_stocks_df)
+        
+        # Cache only if we have valid data
+        if not all_stocks_df.empty:
+            self._save_cache(all_stocks_df, 'market_caps')
         
         # Filter for small caps
         small_caps = all_stocks_df[all_stocks_df['market_cap'] < max_market_cap].copy()
         
         # Add millions column for display
-        for df in [small_caps, all_stocks_df]:
-            df['market_cap_millions'] = df['market_cap'] / 1_000_000
+        small_caps['market_cap_millions'] = small_caps['market_cap'] / 1_000_000
+        all_stocks_df['market_cap_millions'] = all_stocks_df['market_cap'] / 1_000_000
         
         # Sort by market cap
         small_caps = small_caps.sort_values('market_cap', ascending=True)
         
-        # Print completion statistics
         self._print_completion_stats()
         
         return small_caps, all_stocks_df
+        
+    except Exception as e:
+        self.logger.error(f"Screening failed: {str(e)}")
+            raise
 
+    def validate_market_cap(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Comprehensive market cap validation."""
+        if df.empty:
+            return df
+            
+        validated = df.copy()
+        
+        # Convert numeric columns if needed
+        numeric_cols = ['market_cap', 'price', 'shares_outstanding']
+        for col in numeric_cols:
+            if col in validated.columns:
+                validated[col] = pd.to_numeric(validated[col], errors='coerce')
+        
+        # Basic validation filters
+        validated = validated[
+            (validated['market_cap'].notna()) &
+            (validated['market_cap'] > 0) &
+            (validated['market_cap'] < 1e15) &  # Trillion dollar cap
+            (validated['shares_outstanding'].notna()) &
+            (validated['shares_outstanding'] > 1000) &  # Minimum reasonable shares
+            (validated['shares_outstanding'] < 1e11) &  # Maximum reasonable shares
+            (validated['price'].notna()) &
+            (validated['price'] > 0.01) &  # Penny stock minimum
+            (validated['price'] < 1e5)  # Maximum reasonable price
+        ].copy()
+        
+        # Verify market cap calculation
+        validated['calc_market_cap'] = validated['price'] * validated['shares_outstanding']
+        validated = validated[
+            (validated['calc_market_cap'] / validated['market_cap']).between(0.9, 1.1)  # Allow 10% variance
+        ]
+        
+        return validated
+        
+        
     def _print_completion_stats(self):
         """Print detailed completion statistics."""
         print("\nProcessing Statistics:")
@@ -361,23 +431,6 @@ class MarketCapScreener:
             if count > 0:
                 percentage = (count / self.processed_count) * 100
                 print(f"- {error_type}: {count} ({percentage:.1f}%)")
-
-def format_results(df: pd.DataFrame) -> pd.DataFrame:
-    """Format results for display."""
-    display_df = df.copy()
-    
-    # Format numeric columns
-    display_df['market_cap_millions'] = display_df['market_cap_millions'].round(2)
-    display_df['price'] = display_df['price'].round(2)
-    display_df['shares_outstanding'] = display_df['shares_outstanding'].round(0)
-    
-    # Select and rename columns
-    cols = [
-        'ticker', 'name', 'exchange', 'market_cap_millions', 
-        'price', 'shares_outstanding', 'last_updated'
-    ]
-    
-    return display_df[cols]
 
 def main():
     """Main execution function."""
