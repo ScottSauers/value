@@ -53,8 +53,11 @@ def preprocess_table(df):
         # Iterate through the first 6 rows to find header rows
         for i in range(min(6, len(df))):
             row = df.iloc[i].astype(str).str.lower()
-            # Check if the row contains any header keywords
-            if row.str.contains('|'.join(header_keywords), regex=True).any():
+            # Calculate the proportion of cells containing header keywords
+            keyword_matches = row.str.contains('|'.join(header_keywords), regex=True)
+            match_ratio = keyword_matches.sum() / len(row)
+            # Consider a row as header if more than 50% of its cells match header keywords
+            if match_ratio > 0.5:
                 header_rows.append(row)
 
         if header_rows:
@@ -74,7 +77,7 @@ def preprocess_table(df):
 
             logger.debug("Combined multi-level headers and set as column names.")
         else:
-            # If no headers detected, attempt to use the first row as header
+            # Attempt to use the first row as header if it contains header keywords
             first_row = df.iloc[0].astype(str).str.lower()
             if first_row.str.contains('|'.join(header_keywords), regex=True).any():
                 combined_header = first_row.apply(clean_text).str.replace(r'\s+', ' ', regex=True)
@@ -87,7 +90,7 @@ def preprocess_table(df):
                 logger.debug("No header rows detected. Assigned generic column names.")
 
         # Further clean column names
-        df.columns = [re.sub(r'\s+', ' ', col).strip().lower() for col in df.columns]
+        df.columns = [re.sub(r'\s+', ' ', col).strip() for col in df.columns]
 
         # Reset index after dropping rows
         df = df.reset_index(drop=True)
@@ -99,6 +102,31 @@ def preprocess_table(df):
     except Exception as e:
         logger.error(f"Exception in preprocess_table: {e}")
         raise
+
+def classify_table(df):
+    """Classify the table into sections based on content."""
+    try:
+        table_text = df.to_string().lower()
+
+        # Define keywords for classification
+        income_keywords = ['income', 'revenue', 'net income', 'operating income', 'gross margin']
+        balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities',
+                            "shareholders’ equity", "shareholders' equity", 'balance sheet']
+        cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities',
+                              'financing activities', 'net cash', 'cash generated']
+
+        # Priority-based classification
+        if any(keyword in table_text for keyword in income_keywords):
+            return 'Income Statement'
+        elif any(keyword in table_text for keyword in balance_keywords):
+            return 'Balance Sheet'
+        elif any(keyword in table_text for keyword in cash_flow_keywords):
+            return 'Cash Flow Statement'
+        else:
+            return 'Key Financial Ratios'
+    except Exception as e:
+        logger.error(f"Exception in classify_table: {e}")
+        return 'Key Financial Ratios'
 
 def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, Any]]:
     """Parse a table row with improved header handling."""
@@ -138,7 +166,7 @@ def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, An
             return None
 
         return {
-            'label': label,
+            'label': label.capitalize(),
             'value': value,
             'column_name': column_name if column_name else 'N/A'
         }
@@ -170,7 +198,7 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
                 for item in items:
                     column_name = item.get('column_name', 'N/A')
                     # Capitalize the first letter of the label for consistency
-                    label = item['label'].capitalize()
+                    label = item['label']
                     f.write(f"{label}\t{item['value']}\t{column_name}\t{section_name}\n")
         logger.debug("Data successfully saved to TSV.")
     except Exception as e:
@@ -276,23 +304,7 @@ class SECFieldExtractor:
                 logger.debug(f"Table {idx} shape: {df.shape} | Columns: {df.columns.tolist()}")
 
                 # Identify the table type based on content
-                table_text = df.to_string().lower()
-
-                income_keywords = ['income', 'revenue', 'net income', 'operating income', 'gross margin']
-                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities',
-                                    "shareholders’ equity", "shareholders' equity", 'balance sheet']
-                cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities',
-                                      'financing activities', 'net cash', 'cash generated']
-
-                if any(keyword in table_text for keyword in income_keywords):
-                    section = 'Income Statement'
-                elif any(keyword in table_text for keyword in balance_keywords):
-                    section = 'Balance Sheet'
-                elif any(keyword in table_text for keyword in cash_flow_keywords):
-                    section = 'Cash Flow Statement'
-                else:
-                    section = 'Key Financial Ratios'
-
+                section = classify_table(df)
                 logger.info(f"Table {idx}: Classified as '{section}'")
 
                 # Improved row parsing with header context
