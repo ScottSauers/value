@@ -32,8 +32,8 @@ class MarketCapScreener:
     CACHE_DIR = Path("cache")
     BATCH_SIZE = 2  # Smaller batches for better reliability
     
-    def __init__(self, max_workers: int = 20, cache_expiry_days: int = 1):
-        """Initialize with better parallelization settings."""
+    def __init__(self, max_workers: int = 20, cache_expiry_days: int = 1, use_cache: bool = True):
+        self.use_cache = use_cache
         print("\nInitializing MarketCapScreener...")
         self.max_workers = max_workers
         self.cache_expiry_days = cache_expiry_days
@@ -350,32 +350,28 @@ class MarketCapScreener:
         results = self.current_results.copy()  # Start with any existing results
         
         # Process in batches
+        all_results = []  # Keep track of ALL results
         with tqdm(total=total_remaining, desc="Processing") as pbar:
             for i in range(0, total_remaining, self.BATCH_SIZE):
                 batch = remaining_tickers[i:i + self.BATCH_SIZE]
-                print(f"\nProcessing batch {i//self.BATCH_SIZE +1}: Tickes {i+1} to {i + len(batch)}")
                 batch_results = self.process_batch(batch)
-                results.extend(batch_results)
+                all_results.extend(batch_results)  # Save ALL results
                 pbar.update(len(batch))
                 
-                # Progressive caching
-                if len(results) >= 100 or i + self.BATCH_SIZE >= total_remaining:
-                    print(f"\nProgressive caching: Saving {len(results)} results so far...")
-                    df = pd.DataFrame(results)
+                # Progressive caching - save everything we have so far
+                if len(all_results) >= 100 or i + self.BATCH_SIZE >= total_remaining:
+                    df = pd.DataFrame(all_results)  # Use all_results instead of results
                     if not df.empty:
                         print("Merging with exchange data for consistency...")
                         merged_df = pd.merge(df, exchange_df, on='ticker', how='inner')
                         self._save_cache(merged_df, 'market_caps')
-                    else:
-                        print("No results to cache at this point.")
         
-        if not results:
+        if not all_results:  # Check all_results instead of results
             print("No results obtained from processing batches.")
             return pd.DataFrame(), pd.DataFrame()
         
         # Final processing
-        print("\nFinalizing market cap data...")
-        market_caps_df = pd.DataFrame(results)
+        market_caps_df = pd.DataFrame(all_results)
         print(f"Total market cap records: {len(market_caps_df)}")
         print("Merging with exchange data...")
         all_stocks_df = pd.merge(market_caps_df, exchange_df, on='ticker', how='inner')
@@ -476,45 +472,38 @@ class MarketCapScreener:
         """Process batch with better error logging."""
         print(f"\nProcessing batch of {len(batch_tickers)} tickers...")
         results = []
+        local_results = []  # New local list for batch saving
         print(f"Tickers in this batch: {batch_tickers}")
         batch_results = self.get_stock_data_batch(batch_tickers)
         print(f"Got results for {len(batch_results)} tickers in this batch.")
         
         for ticker, data in batch_results.items():
-            print(f"\nProcessing ticker: {ticker}")
             if data:
                 market_cap = data.get('market_cap')
-                print(f"  Market Cap: ${market_cap:,.2f}" if market_cap else "  Market Cap: None")
                 if market_cap:
-                    print(f"  Including ticker {ticker} with market cap ${market_cap:,.2f}.")
-                    results.append({
+                    result = {
                         'ticker': ticker,
                         **data,
                         'last_updated': datetime.now().strftime('%Y-%m-%d')
-                    })
+                    }
+                    results.append(result)  # Add to main results
+                    local_results.append(result)  # Add to local batch
+                    print(f"  Including ticker {ticker} with market cap ${market_cap:,.2f}.")
                     if market_cap < 50_000_000:
                         print(f"  ✓ INCLUDED: Under $50M cap.")
                     else:
                         print(f"  FILTERED: Above $50M cap but saved to all_stocks.")
                     self.stats['success'] += 1
-                else:
-                    print(f"  Skipped {ticker}: No market cap data.")
-            else:
-                print(f"  Skipped {ticker}: No valid data.")
-            self.stats['processed'] += 1
-            self.processed_tickers.add(ticker)
-            print(f"  Total processed tickers so far: {self.stats['processed']}")
-            
-            # Save progress more frequently and include ALL processed companies
-            if time.time() - self.stats['last_save'] > 30 or len(results) >= 10:
-                print(f"\nProgress threshold reached. Saving {len(results)} results to resume state...")
-                self.current_results.extend(results)
+    
+            # Save progress more frequently
+            if len(local_results) >= 10:
+                print(f"\nProgress threshold reached. Saving {len(local_results)} results...")
+                self.current_results.extend(local_results)
                 self._save_resume_state()
-                results = []  # Clear after saving to avoid duplicates
+                local_results = []  # Only clear local batch
                 print("Resume state updated.")
         
-        print(f"Batch processing complete. {len(results)} new results added.")
-        return results
+        return results  # Return ALL results for the batch
 
     def format_results(self, df: pd.DataFrame) -> pd.DataFrame:
         """Format results for display."""
@@ -595,7 +584,7 @@ def main():
     
     try:
         print("\nCreating MarketCapScreener instance...")
-        screener = MarketCapScreener(max_workers=10)
+        screener = MarketCapScreener(max_workers=10, use_cache=True)
         
         print("\nClearing all caches for fresh data...")
         screener.clear_caches()
