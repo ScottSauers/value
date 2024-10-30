@@ -289,13 +289,13 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: Optional[str] = None):
 
         with open(filename, 'w', encoding='utf-8') as f:
             # Write headers
-            f.write("Tag\tValue\tColumn Name\tSection\tForm Type\tFiling Date\n")
+            f.write("Tag\tValue\tColumn Name\tSection\tForm Type\n")
 
             # Write Company Information
-            f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\t{form_type}\t{filing_date}\n")
-            f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\t{form_type}\t{filing_date}\n")
-            f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\t{form_type}\t{filing_date}\n")
-            f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\t{form_type}\t{filing_date}\n")
+            f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\t{form_type}\n")
+            f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\t{form_type}\n")
+            f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\t{form_type}\n")
+            f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\t{form_type}\n")
 
             sections = {
                 'Income Statement': data.get('income_statement', []),
@@ -313,7 +313,7 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: Optional[str] = None):
                     # Retrieve form type and filing date from company_info
                     form_type = company_info.get('form_type', 'N/A')
                     filing_date = company_info.get('filing_date_actual', 'N/A')
-                    f.write(f"{label}\t{value}\t{column_name}\t{section_name}\t{form_type}\t{filing_date}\n")
+                    f.write(f"{label}\t{value}\t{column_name}\t{section_name}\t{form_type}\n")
 
         logger.debug("Data successfully saved to TSV.")
 
