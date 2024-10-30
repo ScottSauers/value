@@ -41,34 +41,50 @@ def preprocess_table(df):
         # Drop completely empty rows and columns
         df = df.dropna(how='all').dropna(axis=1, how='all')
         
-        # Define additional keywords to identify header rows
-        header_keywords = ['Year', 'Month', 'Period', 'Date', 'Fiscal', 'Quarter', 'Type']
-        
-        # Initialize headers list
-        headers = []
-        
-        # Iterate through the first 5 rows to find header rows
-        for i in range(min(5, len(df))):
-            row = df.iloc[i]
-            if row.astype(str).str.contains('|'.join(header_keywords), case=False, regex=True).any():
-                headers.append(row)
-        
-        if headers:
-            # Combine headers vertically
-            header = pd.concat(headers).fillna('')
-            # Create meaningful column names using clean_text to ensure strings
-            columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
-            
-            # Check if header length matches df columns
-            if len(columns) == len(df.columns):
-                df.columns = columns  # Set new headers if they match
-                df = df.iloc[len(headers):]  # Drop header rows
+        # Check if all column names are generic
+        if all(col.startswith('column_') for col in df.columns):
+            # Check if the first row contains mostly non-numeric data
+            non_numeric = df.iloc[0].apply(lambda x: not re.match(r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$', str(x).replace(' ', '')))
+            if non_numeric.sum() > len(df.columns) / 2:
+                logger.debug("Table has generic column names and first row contains non-numeric data. Assigning first row as headers.")
+                # Assume the first row is header
+                new_header = df.iloc[0]
+                df = df[1:]
+                df.columns = [clean_text(str(col)) for col in new_header]
+                logger.debug(f"Updated columns from first row: {df.columns.tolist()}")
             else:
-                # Fallback: Set default column names if there's a mismatch
-                df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+                logger.debug("Table has generic column names but first row contains mostly numeric data. Keeping generic column names.")
         else:
-            # If no headers detected, assign default column names
-            df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+            # Define additional keywords to identify header rows
+            header_keywords = ['Year', 'Month', 'Period', 'Date', 'Fiscal', 'Quarter', 'Type']
+            
+            # Initialize headers list
+            headers = []
+            
+            # Iterate through the first 5 rows to find header rows
+            for i in range(min(5, len(df))):
+                row = df.iloc[i]
+                if row.astype(str).str.contains('|'.join(header_keywords), case=False, regex=True).any():
+                    headers.append(row)
+            
+            if headers:
+                # Combine headers vertically
+                header = pd.concat(headers).fillna('')
+                # Create meaningful column names using clean_text to ensure strings
+                columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
+                
+                # Check if header length matches df columns
+                if len(columns) == len(df.columns):
+                    df.columns = columns  # Set new headers if they match
+                    df = df.iloc[len(headers):]  # Drop header rows
+                else:
+                    # Fallback: Set default column names if there's a mismatch
+                    df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+                    logger.debug("Header rows found but column count mismatch. Assigned generic column names.")
+            else:
+                # If no headers detected, assign default column names
+                df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+                logger.debug("No header rows detected. Assigned generic column names.")
         
         # Clean column names
         df.columns = [clean_text(str(col)).lower() for col in df.columns]
@@ -197,14 +213,14 @@ class SECFieldExtractor:
                 
             logger.info(f"Processing 10-K for {company_info.name} (CIK: {company_info.cik})")
             
-            # Wrap the HTML content in StringIO to fix the FutureWarning
+            # Download and decode the HTML content
             html_content = self.downloader.download_filing(url=metadata.primary_doc_url).decode()
             
             if not html_content:
                 logger.error("Downloaded HTML content is empty.")
                 return None
                 
-            # Use 'lxml' parser for better handling and suppress XMLParsedAsHTMLWarning
+            # Parse the HTML content using 'lxml' parser
             self.soup = BeautifulSoup(html_content, 'lxml')  # or 'xml' if appropriate
             financial_data = self.extract_financial_data()
             financial_data['company_info'] = {
@@ -239,6 +255,12 @@ class SECFieldExtractor:
             
             logger.info(f"Found {len(tables)} tables in the document.")
             
+            # Print the first two raw tables for inspection
+            for idx, df in enumerate(tables[:2], start=1):
+                print(f"\n--- Raw Table {idx} ---")
+                print(df.head())
+                print("----------------------\n")
+            
             for idx, df in enumerate(tables, start=1):
                 # Apply preprocessing to clean and structure the table
                 df = preprocess_table(df)
@@ -250,7 +272,7 @@ class SECFieldExtractor:
                 table_text = df.to_string().lower()
 
                 income_keywords = ['income', 'revenue', 'net income', 'operating income']
-                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', 'shareholders’ equity', 'shareholders\' equity']
+                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', "shareholders’ equity", "shareholders' equity"]
                 cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities', 'financing activities', 'net cash']
 
                 if any(keyword in table_text for keyword in income_keywords):
