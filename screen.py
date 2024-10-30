@@ -21,8 +21,115 @@ import pickle
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 
+class CustomHTTPAdapter(HTTPAdapter):
+    """Custom HTTP Adapter with proper retry strategy."""
+    def __init__(self, max_retries=3):
+        retry_strategy = Retry(
+            total=max_retries,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        super().__init__(max_retries=retry_strategy, pool_connections=50, pool_maxsize=50)
+
 class MarketCapScreener:
     """Enhanced screener with fixed market cap calculation and additional metrics."""
+
+        SHARES_OUTSTANDING_TAGS = [
+        "WeightedAverageNumberOfSharesOutstandingBasic",
+        "CommonStockSharesOutstanding",
+        "SharesOutstanding",
+        "WeightedAverageNumberOfDilutedSharesOutstanding"
+    ]
+    
+    CACHE_DIR = Path("cache")
+
+    def __init__(self, max_workers: int = 20, cache_expiry_days: int = 1):
+        """Initialize the screener with caching support."""
+        self.max_workers = max_workers
+        self.cache_expiry_days = cache_expiry_days
+        self.error_counts = {
+            'price_fetch_failed': 0,
+            'shares_fetch_failed': 0,
+            'invalid_market_cap': 0,
+            'connection_error': 0,
+            'other_errors': 0
+        }
+        self.processed_count = 0
+        self.success_count = 0
+        
+        # Create cache directory
+        self.CACHE_DIR.mkdir(exist_ok=True)
+        
+        # Setup logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler()]
+        )
+        self.logger = logging.getLogger(__name__)
+        
+        # Setup custom session with proper connection pooling
+        self.session = requests.Session()
+        adapter = CustomHTTPAdapter(max_retries=3)
+        self.session.mount('https://', adapter)
+
+    def _get_cache_path(self, cache_type: str) -> Path:
+        """Get cache file path."""
+        return self.CACHE_DIR / f"{cache_type}_{datetime.now().strftime('%Y%m%d')}.pkl"
+
+    def _is_cache_valid(self, cache_path: Path) -> bool:
+        """Check if cache is still valid."""
+        if not cache_path.exists():
+            return False
+        cache_time = datetime.fromtimestamp(cache_path.stat().st_mtime)
+        return datetime.now() - cache_time < timedelta(days=self.cache_expiry_days)
+
+    def _load_cache(self, cache_type: str) -> Optional[pd.DataFrame]:
+        """Load data from cache if valid."""
+        cache_path = self._get_cache_path(cache_type)
+        if self._is_cache_valid(cache_path):
+            try:
+                with open(cache_path, 'rb') as f:
+                    return pickle.load(f)
+            except Exception as e:
+                self.logger.warning(f"Failed to load cache: {str(e)}")
+        return None
+
+    def _save_cache(self, data: pd.DataFrame, cache_type: str):
+        """Save data to cache."""
+        try:
+            cache_path = self._get_cache_path(cache_type)
+            with open(cache_path, 'wb') as f:
+                pickle.dump(data, f)
+        except Exception as e:
+            self.logger.warning(f"Failed to save cache: {str(e)}")
+
+    def get_exchange_listed_companies(self) -> pd.DataFrame:
+        """Get companies from major exchanges with caching."""
+        # Try to load from cache
+        cached_data = self._load_cache('exchanges')
+        if cached_data is not None:
+            return cached_data
+            
+        try:
+            df = finagg.sec.api.exchanges.get()
+            
+            # Filter for major exchanges
+            major_exchanges = ['NYSE', 'Nasdaq', 'NYSE Arca', 'NYSE American']
+            df = df[df['exchange'].isin(major_exchanges)]
+            
+            # Basic filtering
+            df = df[df['name'].notna()]
+            df = df[df['ticker'].str.len() <= 5]
+            
+            # Cache the results
+            self._save_cache(df, 'exchanges')
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get exchange data: {str(e)}")
+            raise
     
     def get_stock_data(self, ticker: str) -> Optional[Dict]:
         """Get comprehensive stock data including price, volume, and shares."""
