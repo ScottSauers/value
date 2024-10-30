@@ -269,14 +269,14 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     """Save fields to a TSV file."""
     logger.debug(f"Saving data to {filename}")
     try:
-        with open(filename, 'w') as f:
-            f.write("Tag\tValue\tColumn Name\tSection\n")
-
+        with open(filename, 'a') as f:  # Changed to append mode
             company_info = data.get('company_info', {})
-            f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\n")
-            f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\n")
-            f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\n")
-            f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\n")
+            
+            # Write Company Information
+            f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\t{company_info.get('form_type', 'N/A')}\t{company_info.get('filing_date_actual', 'N/A')}\n")
+            f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\t{company_info.get('form_type', 'N/A')}\t{company_info.get('filing_date_actual', 'N/A')}\n")
+            f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\t{company_info.get('form_type', 'N/A')}\t{company_info.get('filing_date_actual', 'N/A')}\n")
+            f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\t{company_info.get('form_type', 'N/A')}\t{company_info.get('filing_date_actual', 'N/A')}\n")
 
             sections = {
                 'Income Statement': data.get('income_statement', []),
@@ -290,7 +290,11 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
                     column_name = item.get('column_name', 'N/A')
                     # Capitalize the first letter of the label for consistency
                     label = item['label']
-                    f.write(f"{label}\t{item['value']}\t{column_name}\t{section_name}\n")
+                    value = item['value']
+                    # Retrieve form type and filing date from company_info
+                    form_type = company_info.get('form_type', 'N/A')
+                    filing_date = company_info.get('filing_date_actual', 'N/A')
+                    f.write(f"{label}\t{value}\t{column_name}\t{section_name}\t{form_type}\t{filing_date}\n")
         logger.debug("Data successfully saved to TSV.")
     except Exception as e:
         logger.error(f"Error saving TSV: {e}")
