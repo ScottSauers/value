@@ -566,22 +566,20 @@ class MarketCapScreener:
             if count > 0:
                 print(f"- {error_type}: {count}")
 
-
-
-def clear_caches(self):
-    """Clear all cache files to ensure fresh data."""
-    cache_files = ['market_caps.pkl', 'exchanges.pkl', 'resume_data.pkl']
-    try:
-        for cache_file in cache_files:
-            cache_path = self.CACHE_DIR / cache_file
-            if cache_path.exists():
-                cache_path.unlink()
-                print(f"Deleted cache: {cache_file}")
-        if os.path.exists("yfinance.cache"):
-            os.remove("yfinance.cache")
-            print("Deleted YFinance cache")
-    except Exception as e:
-        print(f"Error clearing caches: {e}")
+    def clear_caches(self):
+        """Clear all cache files to ensure fresh data."""
+        cache_files = ['market_caps.pkl', 'exchanges.pkl', 'resume_data.pkl']
+        try:
+            for cache_file in cache_files:
+                cache_path = self.CACHE_DIR / cache_file
+                if cache_path.exists():
+                    cache_path.unlink()
+                    print(f"Deleted cache: {cache_file}")
+            if os.path.exists("yfinance.cache"):
+                os.remove("yfinance.cache")
+                print("Deleted YFinance cache")
+        except Exception as e:
+            print(f"Error clearing caches: {e}")
     
 def main():
     print("\n=== MarketCapScreener Execution Started ===")
