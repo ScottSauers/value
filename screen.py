@@ -34,7 +34,7 @@ class CustomHTTPAdapter(HTTPAdapter):
 class MarketCapScreener:
     """Enhanced screener with fixed market cap calculation and additional metrics."""
 
-        SHARES_OUTSTANDING_TAGS = [
+    SHARES_OUTSTANDING_TAGS = [
         "WeightedAverageNumberOfSharesOutstandingBasic",
         "CommonStockSharesOutstanding",
         "SharesOutstanding",
