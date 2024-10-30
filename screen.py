@@ -91,14 +91,14 @@ class MarketCapScreener:
         print(f"\nStarting data retrieval for ticker: {ticker}")
         try:
             # Add small delay between requests
-            print("Sleeping for 0.1 seconds to respect rate limits...")
+            #print("Sleeping for 0.1 seconds to respect rate limits...")
             time.sleep(0.1)
             
             # Use the finagg API for basic price data
             print(f"Fetching price data for {ticker} using finagg...")
             try:
                 price_data = finagg.yfinance.api.get(ticker, period="5d")
-                print(f"Price data fetched for {ticker}: {price_data.head()}")
+                #print(f"Price data fetched for {ticker}: {price_data.head()}")
                 if price_data.empty:
                     print(f"Price data for {ticker} is empty. Skipping.")
                     return None
