@@ -31,11 +31,13 @@ def clean_text(text: Any) -> str:
     text = str(text) if not isinstance(text, str) else text
     return ' '.join(text.split()).strip()
 
-def extract_years_from_string(s: str) -> List[str]:
-    """Extract four-digit years from a string."""
-    return re.findall(r'(?:19|20)\d{2}', s)
+def is_date(string: str) -> bool:
+    """Check if the string matches common date patterns."""
+    date_pattern1 = r'^[A-Za-z]+\s+\d{1,2},\s+\d{4}$'  # e.g., September 30, 2023
+    date_pattern2 = r'^\d{4}$'  # e.g., 2023
+    return bool(re.match(date_pattern1, string)) or bool(re.match(date_pattern2, string))
 
-def preprocess_table(df):
+def preprocess_table(df: pd.DataFrame) -> pd.DataFrame:
     """Preprocess table to handle complex headers and clean data."""
     try:
         # Drop completely empty rows and columns
@@ -44,23 +46,38 @@ def preprocess_table(df):
         # Ensure column names are strings
         df.columns = [str(col) for col in df.columns]
 
-        # Define header keywords to identify potential header rows
-        header_keywords = ['year', 'month', 'period', 'date', 'fiscal', 'quarter', 'type', 'item', 'line', 'description']
-
-        # Initialize headers list
-        header_rows = []
-
-        # Iterate through the first 10 rows to find header rows
+        # Identify header rows based on date patterns
+        date_header_rows = []
         for i in range(min(10, len(df))):
-            row = df.iloc[i].astype(str).str.lower()
-            # Calculate the proportion of cells containing header keywords
-            keyword_matches = row.str.contains('|'.join(header_keywords), regex=True)
-            match_ratio = keyword_matches.sum() / len(row)
-            # Consider a row as header if more than 50% of its cells match header keywords
-            if match_ratio > 0.5:
-                header_rows.append(row)
+            row = df.iloc[i].astype(str)
+            date_matches = row.apply(is_date)
+            if date_matches.sum() >= 2:  # At least two date-like entries
+                date_header_rows.append(row)
+                break  # Assume only one date header row
 
-        if header_rows:
+        if date_header_rows:
+            # Use the identified date header row as column headers
+            date_header = date_header_rows[0].apply(clean_text)
+            # Assign to column names
+            df.columns = date_header
+
+            # Drop the header row from the DataFrame
+            df = df.iloc[len(date_header_rows):].reset_index(drop=True)
+
+            logger.debug("Set date header row as column names.")
+        else:
+            # Fallback to existing logic
+            # Define header keywords to identify potential header rows
+            header_keywords = ['year', 'month', 'period', 'date', 'fiscal', 'quarter', 'type', 'item', 'line', 'description']
+
+            header_rows = []
+            for i in range(min(10, len(df))):
+                row = df.iloc[i].astype(str).str.lower()
+                keyword_matches = row.str.contains('|'.join(header_keywords), regex=True)
+                match_ratio = keyword_matches.sum() / len(row)
+                if match_ratio > 0.5:
+                    header_rows.append(row)
+
             # Define label row keywords to exclude
             label_row_keywords = ['years ended', 'total', 'percentage', 'change', 'subtotal']
             filtered_header_rows = []
@@ -87,21 +104,17 @@ def preprocess_table(df):
 
                 logger.debug("Combined multi-level headers and set as column names.")
             else:
-                # No valid header rows after filtering, assign default names
-                df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
-                logger.debug("No valid header rows after filtering. Assigned generic column names.")
-        else:
-            # Attempt to use the first row as header if it contains header keywords
-            first_row = df.iloc[0].astype(str).str.lower()
-            if first_row.str.contains('|'.join(header_keywords), regex=True).any():
-                combined_header = first_row.apply(clean_text).str.replace(r'\s+', ' ', regex=True)
-                df = df[1:].reset_index(drop=True)
-                df.columns = combined_header
-                logger.debug("Assigned first row as header.")
-            else:
-                # Assign default column names if no headers detected
-                df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
-                logger.debug("No header rows detected. Assigned generic column names.")
+                # Attempt to use the first row as header if it contains header keywords
+                first_row = df.iloc[0].astype(str).str.lower()
+                if first_row.str.contains('|'.join(header_keywords), regex=True).any():
+                    combined_header = first_row.apply(clean_text).str.replace(r'\s+', ' ', regex=True)
+                    df = df[1:].reset_index(drop=True)
+                    df.columns = combined_header
+                    logger.debug("Assigned first row as header.")
+                else:
+                    # Assign default column names if no headers detected
+                    df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
+                    logger.debug("No header rows detected. Assigned generic column names.")
 
         # Further clean column names
         df.columns = [re.sub(r'\s+', ' ', col).strip() for col in df.columns]
@@ -117,7 +130,7 @@ def preprocess_table(df):
         logger.error(f"Exception in preprocess_table: {e}")
         raise
 
-def classify_table(df):
+def classify_table(df: pd.DataFrame) -> str:
     """Classify the table into sections based on content."""
     try:
         table_text = df.to_string().lower()
@@ -142,22 +155,28 @@ def classify_table(df):
         logger.error(f"Exception in classify_table: {e}")
         return 'Key Financial Ratios'
 
-def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, Any]]:
-    """Parse a table row with improved header handling."""
+def parse_table_row(row: List[str], headers: List[str]) -> List[Dict[str, Any]]:
+    """
+    Parse a table row to extract all label-value pairs.
+    
+    Returns a list of dictionaries, each containing:
+    - label: The financial metric label.
+    - value: The numeric value.
+    - column_name: The corresponding fiscal year.
+    """
     try:
         if not headers or not row or len(row) < 2:
-            return None
+            return []
 
         # Get the label from the first column
         label = clean_text(str(row[0])).lower()
         if not label or label in ['nan', 'none', '']:
-            return None
+            return []
 
-        # Initialize value and column name
-        value = None
-        column_name = None
+        # Initialize list to hold multiple entries
+        entries = []
 
-        # Iterate through cells to find the first valid numeric value
+        # Iterate through all cells to extract numeric values
         for i, cell in enumerate(row[1:], start=1):
             cell_str = str(cell)
             # Clean the cell value
@@ -172,23 +191,22 @@ def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, An
             if re.match(numeric_pattern, cleaned_cell.replace(' ', '')):
                 # Remove any non-numeric characters for value extraction
                 numeric_value = re.sub(r'[^\d\.-]', '', cleaned_cell)
-                value = numeric_value
                 # Get corresponding header if available
                 if i < len(headers):
                     column_name = clean_text(str(headers[i]))
-                break
+                else:
+                    column_name = 'N/A'
 
-        if not value:
-            return None
+                entries.append({
+                    'label': label.capitalize(),
+                    'value': numeric_value,
+                    'column_name': column_name if column_name else 'N/A'
+                })
 
-        return {
-            'label': label.capitalize(),
-            'value': value,
-            'column_name': column_name if column_name else 'N/A'
-        }
+        return entries
     except Exception as e:
         logger.error(f"Exception in parse_table_row: {e} | Row: {row} | Headers: {headers}")
-        return None
+        return []
 
 def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     """Save fields to a TSV file."""
@@ -302,7 +320,7 @@ class SECFieldExtractor:
             logger.info(f"Found {len(tables)} tables in the document.")
 
             # Optionally, print the first few tables for debugging
-            for idx, df in enumerate(tables[:50], start=1):
+            for idx, df in enumerate(tables[:10], start=1):
                 print(f"\n--- Raw Table {idx} ---")
                 for row_num in range(min(5, len(df))):
                     row = df.iloc[row_num].tolist()
@@ -329,12 +347,13 @@ class SECFieldExtractor:
                     if row.astype(str).str.contains('year|month|period|date|item|line|description', case=False).any():
                         continue
 
-                    row_data = parse_table_row(row.tolist(), df.columns.tolist())
-                    if row_data:
-                        # Store data in appropriate section
-                        section_key = section.lower().replace(' ', '_')
-                        if section_key in data:
-                            data[section_key].append(row_data)
+                    row_entries = parse_table_row(row.tolist(), df.columns.tolist())
+                    if row_entries:
+                        # Store each entry in the appropriate section
+                        for entry in row_entries:
+                            section_key = section.lower().replace(' ', '_')
+                            if section_key in data:
+                                data[section_key].append(entry)
 
         except Exception as e:
             logger.error(f"Error processing tables: {e}")
