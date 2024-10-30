@@ -222,7 +222,6 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
             company_info = data.get('company_info', {})
             f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\n")
             f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\n")
-            f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\n")
             f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\n")
 
             sections = {
@@ -295,7 +294,6 @@ class SECFieldExtractor:
             financial_data['company_info'] = {
                 'name': company_info.name,
                 'cik': company_info.cik,
-                'filing_date': company_info.filing_date,
                 'report_date': company_info.report_date
             }
             return financial_data
