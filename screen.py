@@ -138,6 +138,10 @@ class MarketCapScreener:
                         # Estimate shares outstanding
                         if latest_price > 0:
                             result['shares_outstanding'] = info['marketCap'] / latest_price
+                if not info or ('marketCap' not in info and 'sharesOutstanding' not in info):
+                    self.logger.debug(f"No market cap data available for {ticker}")
+                    self.stats['errors']['no_market_cap'] += 1
+                    return None
                 
             except Exception as e:
                 # Log the error but continue with the data we have
