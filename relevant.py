@@ -47,10 +47,15 @@ def preprocess_table(df):
             header = pd.concat(headers).fillna('')
             # Create meaningful column names
             columns = [' '.join(filter(None, col.split())) for col in header]
-            # Set new headers and drop header rows
-            df.columns = columns
-            df = df.iloc[len(headers):]
-    
+            
+            # Check if header length matches df columns
+            if len(columns) == len(df.columns):
+                df.columns = columns  # Set new headers if they match
+                df = df.iloc[len(headers):]  # Drop header rows
+            else:
+                # Fallback: Set default column names if there's a mismatch
+                df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+
     # Clean column names
     df.columns = [clean_text(str(col)).lower() for col in df.columns]
     
