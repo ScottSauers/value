@@ -71,8 +71,50 @@ class MarketCapScreener:
         self.BATCH_SIZE = 50  # Process more tickers at once
 
     def _get_cache_path(self, cache_type: str) -> Path:
-        """Get cache file path with date stamping."""
-        return self.CACHE_DIR / f"{cache_type}_{datetime.now().strftime('%Y%m%d')}.pkl"
+            """Get cache file path without date stamping."""
+            return self.CACHE_DIR / f"{cache_type}.pkl"  # Think about date dependency
+    
+        def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+            """Get data for a single ticker with proper rate limiting."""
+            try:
+                # Use session for automatic rate limiting and caching
+                ticker_obj = yf.Ticker(ticker, session=self.session)
+                info = ticker_obj.info
+                hist = ticker_obj.history(period="5d")
+                
+                if not info:  # Only check if we got any info at all
+                    return None
+                    
+                latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
+                avg_price = hist['Close'].mean() if not hist.empty else latest_price
+                avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
+                
+                # Get market cap directly or calculate it
+                market_cap = info.get('marketCap')
+                if market_cap is None and latest_price is not None and info.get('sharesOutstanding') is not None:
+                    market_cap = latest_price * info['sharesOutstanding']
+                
+                # Only require market cap and price for basic validity
+                if market_cap is None or latest_price is None:
+                    print(f"  Skipped {ticker}: Missing required data - Market Cap: {market_cap}, Price: {latest_price}")
+                    return None
+                    
+                result = {
+                    'price': latest_price,
+                    'volume': info.get('volume', 0),
+                    'avg_volume': avg_volume,
+                    'shares_outstanding': info.get('sharesOutstanding'),
+                    'market_cap': market_cap,
+                    'high': info.get('dayHigh'),
+                    'low': info.get('dayLow'),
+                    'open': info.get('open')
+                }
+                
+                return result
+                
+            except Exception as e:
+                self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
+                return None
 
     def _get_resume_path(self) -> Path:
         """Get path for resume data."""
@@ -334,8 +376,11 @@ class MarketCapScreener:
                         **data,
                         'last_updated': datetime.now().strftime('%Y-%m-%d')
                     })
+                    if market_cap < 50_000_000:
+                        print(f"  ✓ INCLUDED: Under $50M cap")
+                    else:
+                        print(f"  FILTERED: Above $50M cap but saved to all_stocks")
                     self.stats['success'] += 1
-                    self.logger.debug(f"Processed {ticker}: market cap {data['market_cap']}")
                 else:
                     print(f"  Skipped: No market cap data")
             else:
@@ -343,10 +388,12 @@ class MarketCapScreener:
             self.stats['processed'] += 1
             self.processed_tickers.add(ticker)
 
-        if time.time() - self.stats['last_save'] > 30:
-            print(f"\nSaving {len(results)} results to cache...")
-            self.current_results.extend(results)
-            self._save_resume_state()
+            # Save progress more frequently and include ALL processed companies
+            if time.time() - self.stats['last_save'] > 30 or len(results) >= 10:
+                print(f"\nSaving {len(results)} results to resume state...")
+                self.current_results.extend(results)
+                self._save_resume_state()
+                results = []  # Clear after saving to avoid duplicates
 
         return results
 
