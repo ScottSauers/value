@@ -49,8 +49,8 @@ def preprocess_table(df):
         if headers:
             # Combine headers vertically
             header = pd.concat(headers).fillna('')
-            # Create meaningful column names
-            columns = [' '.join(filter(None, col.split())) for col in header]
+            # Create meaningful column names using clean_text to ensure strings
+            columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
             
             # Check if header length matches df columns
             if len(columns) == len(df.columns):
@@ -184,8 +184,9 @@ class SECFieldExtractor:
                 logger.error("Downloaded HTML content is empty.")
                 return None
                 
-            # Use 'lxml' parser for better handling and suppress XMLParsedAsHTMLWarning
-            self.soup = BeautifulSoup(html_content, 'lxml')
+            # Use 'xml' parser if applicable, else 'lxml'
+            # To suppress the XMLParsedAsHTMLWarning, you can handle it appropriately
+            self.soup = BeautifulSoup(html_content, 'lxml')  # or 'xml' if appropriate
             financial_data = self.extract_financial_data()
             financial_data['company_info'] = {
                 'name': company_info.name,
@@ -198,7 +199,7 @@ class SECFieldExtractor:
         except Exception as e:
             logger.error(f"Error processing 10-K: {e}")
             return None
-    
+
     def extract_financial_data(self) -> Dict[str, Any]:
         """Extract key financial data from the document with table parsing."""
         data = {
