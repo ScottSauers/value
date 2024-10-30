@@ -25,7 +25,6 @@ class CompanyInfo:
     filing_date: str
     report_date: str
     form_type: str
-    file_number: str
     fiscal_year_end: str
     period_of_report: str
     accepted_date: str
@@ -260,7 +259,6 @@ class SECFieldExtractor:
             filing_date=filing_metadata.filing_date,
             report_date=filing_metadata.report_date,
             form_type=filing_metadata.form_type,
-            file_number=filing_metadata.file_number,
             fiscal_year_end=filing_metadata.fiscal_year_end,
             period_of_report=filing_metadata.period_of_report,
             accepted_date=filing_metadata.accepted_date,
