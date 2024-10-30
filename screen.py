@@ -50,13 +50,15 @@ class MarketCapScreener:
         self.CACHE_DIR.mkdir(exist_ok=True)
         print(f"Cache directory ensured at: {self.CACHE_DIR.resolve()}")
         
-        # Setup better session with increased rate limits
         print("Setting up CachedLimiterSession...")
         self.session = CachedLimiterSession(
-            limiter=Limiter(RequestRate(10, Duration.SECOND)),  # 10 requests/sec
+            limiter=Limiter(RequestRate(2, Duration.SECOND)),
             bucket_class=MemoryQueueBucket,
             backend=SQLiteCache("yfinance.cache")
         )
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
         print("CachedLimiterSession initialized.")
         
         # Setup logging
@@ -85,50 +87,52 @@ class MarketCapScreener:
         cache_path = self.CACHE_DIR / f"{cache_type}.pkl"
         print(f"Cache path for '{cache_type}': {cache_path.resolve()}")
         return cache_path
-
+    
     def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get data for a single ticker with proper rate limiting."""
-        #print(f"\nStarting data retrieval for ticker: {ticker}")
         try:
-            # First get basic price data using finagg's yfinance wrapper
-            # This is more reliable than direct yfinance for price data
-            try:
-                price_data = finagg.yfinance.api.get(ticker, period="5d")
-                if price_data.empty:
-                    print(f"Price data for {ticker} is empty. Skipping.")
-                    return None
-                latest_price = price_data['close'].iloc[-1]
-                print(f"Latest price for {ticker}: {latest_price}")
-            except Exception as e:
-                self.logger.debug(f"Failed to get finagg price data for {ticker}: {str(e)}")
+            # First get basic price data
+            price_data = finagg.yfinance.api.get(ticker, period="5d")
+            if price_data.empty:
+                print(f"Price data for {ticker} is empty. Skipping.")
                 return None
+            latest_price = price_data['close'].iloc[-1]
+            print(f"Latest price for {ticker}: {latest_price}")
     
-            # Now get market cap data directly from yfinance
+            # Create YFinance Ticker object with proper session
+            yf.pdr_override()  # Override pandas datareader
+            time.sleep(0.1)  # Rate limiting
+            
             try:
-                ticker_obj = yf.Ticker(ticker, session=self.session)
-                info = ticker_obj.info
-                
-                if not info:
-                    print(f"No info available for {ticker}")
-                    return None
+                ticker_obj = yf.Ticker(ticker)
+                # Force info to load by accessing a property
+                print(f"Attempting to get info for {ticker}...")
+                info = ticker_obj.basic_info  # Use basic_info instead of info
+                print(f"Got info for {ticker}")
     
-                # Try multiple methods to get accurate market cap
+                # Method 1: Try to get market cap directly
                 market_cap = None
-                shares_outstanding = None
-    
-                # Method 1: Direct market cap
-                if 'marketCap' in info:
-                    print(f"Market Cap: {info['marketCap']}")
-                    market_cap = info['marketCap']
-                    shares_outstanding = market_cap / latest_price if latest_price > 0 else None
+                if hasattr(ticker_obj, 'info') and 'marketCap' in ticker_obj.info:
+                    market_cap = ticker_obj.info['marketCap']
+                    print(f"{ticker} Market Cap from info: {market_cap}")
                 
-                # Method 2: Calculate from shares
-                if market_cap is None and 'sharesOutstanding' in info:
-                    shares_outstanding = info['sharesOutstanding']
-                    market_cap = shares_outstanding * latest_price
-                    print(f"Market Cap: {market_cap}")
+                # Method 2: Try to get from fast info
+                if market_cap is None:
+                    fast_info = ticker_obj.fast_info
+                    if hasattr(fast_info, 'market_cap'):
+                        market_cap = fast_info.market_cap
+                        print(f"{ticker} Market Cap from fast_info: {market_cap}")
+                
+                # Method 3: Calculate from shares if needed
+                shares_outstanding = None
+                if market_cap is None and hasattr(ticker_obj, 'info'):
+                    info = ticker_obj.info
+                    if 'sharesOutstanding' in info:
+                        shares_outstanding = info['sharesOutstanding']
+                        market_cap = shares_outstanding * latest_price
+                        print(f"{ticker} Market Cap calculated: {market_cap}")
     
-                # If we still don't have market cap data, skip this ticker
+                # Final check
                 if market_cap is None or market_cap <= 0:
                     print(f"No valid market cap data for {ticker}")
                     return None
@@ -136,7 +140,7 @@ class MarketCapScreener:
                 return {
                     'ticker': ticker,
                     'price': latest_price,
-                    'shares_outstanding': shares_outstanding,
+                    'shares_outstanding': shares_outstanding or (market_cap / latest_price if latest_price > 0 else None),
                     'market_cap': market_cap,
                     'high': price_data['high'].iloc[-1],
                     'low': price_data['low'].iloc[-1],
@@ -145,11 +149,11 @@ class MarketCapScreener:
                 }
     
             except Exception as e:
-                self.logger.debug(f"Failed to get yfinance data for {ticker}: {str(e)}")
+                print(f"YFinance error for {ticker}: {str(e)}")
                 return None
     
         except Exception as e:
-            self.logger.debug(f"Error processing {ticker}: {str(e)}")
+            print(f"Error processing {ticker}: {str(e)}")
             return None
 
     def _get_resume_path(self) -> Path:
