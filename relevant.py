@@ -40,61 +40,69 @@ def preprocess_table(df):
     try:
         # Drop completely empty rows and columns
         df = df.dropna(how='all').dropna(axis=1, how='all')
-        
-        # Check if all column names are generic
+
+        # Ensure column names are strings
+        df.columns = [str(col) for col in df.columns]
+
+        # Check if all column names start with 'column_'
         if all(col.startswith('column_') for col in df.columns):
-            # Check if the first row contains mostly non-numeric data
-            non_numeric = df.iloc[0].apply(lambda x: not re.match(r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$', str(x).replace(' ', '')))
-            if non_numeric.sum() > len(df.columns) / 2:
-                logger.debug("Table has generic column names and first row contains non-numeric data. Assigning first row as headers.")
+            # Check if first row has mostly non-numeric data
+            first_row = df.iloc[0]
+            non_numeric_count = first_row.apply(
+                lambda x: not re.match(r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$', str(x).replace(' ', ''))
+            ).sum()
+
+            if non_numeric_count > len(df.columns) / 2:
+                logger.debug("Assuming first row contains headers.")
                 # Assume the first row is header
                 new_header = df.iloc[0]
                 df = df[1:]
                 df.columns = [clean_text(str(col)) for col in new_header]
                 logger.debug(f"Updated columns from first row: {df.columns.tolist()}")
             else:
-                logger.debug("Table has generic column names but first row contains mostly numeric data. Keeping generic column names.")
+                logger.debug("First row is likely data, keeping generic column names.")
         else:
             # Define additional keywords to identify header rows
             header_keywords = ['Year', 'Month', 'Period', 'Date', 'Fiscal', 'Quarter', 'Type']
-            
+
             # Initialize headers list
             headers = []
-            
+
             # Iterate through the first 5 rows to find header rows
             for i in range(min(5, len(df))):
                 row = df.iloc[i]
                 if row.astype(str).str.contains('|'.join(header_keywords), case=False, regex=True).any():
                     headers.append(row)
-            
+
             if headers:
                 # Combine headers vertically
                 header = pd.concat(headers).fillna('')
                 # Create meaningful column names using clean_text to ensure strings
                 columns = [' '.join(filter(None, clean_text(col).split())) for col in header]
-                
+
                 # Check if header length matches df columns
                 if len(columns) == len(df.columns):
                     df.columns = columns  # Set new headers if they match
                     df = df.iloc[len(headers):]  # Drop header rows
+                    logger.debug("Headers matched and set successfully.")
                 else:
                     # Fallback: Set default column names if there's a mismatch
-                    df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+                    df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
                     logger.debug("Header rows found but column count mismatch. Assigned generic column names.")
             else:
                 # If no headers detected, assign default column names
-                df.columns = [f"Column_{i+1}" for i in range(len(df.columns))]
+                df.columns = [f"column_{i+1}" for i in range(len(df.columns))]
                 logger.debug("No header rows detected. Assigned generic column names.")
-        
+
         # Clean column names
         df.columns = [clean_text(str(col)).lower() for col in df.columns]
-        
+
         # Reset index after dropping rows
         df = df.reset_index(drop=True)
-        
+
         # Log the final column names for verification
         logger.debug(f"Processed columns: {df.columns.tolist()}")
-        
+
         return df
     except Exception as e:
         logger.error(f"Exception in preprocess_table: {e}")
@@ -114,17 +122,17 @@ def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, An
         # Look for value and corresponding header
         value = None
         column_name = None
-        
+
         # Iterate through cells to find the first valid numeric value
         for i, cell in enumerate(row[1:], start=1):
             cell_str = str(cell)
             # Clean the cell value
             cleaned_cell = clean_text(cell_str)
-            
+
             # Skip empty cells
             if not cleaned_cell or cleaned_cell.lower() in ['nan', 'none']:
                 continue
-                
+
             # Check if the cell contains a numeric value or parenthesized number
             numeric_pattern = r'^-?\$?\s*\(?\d[\d,\.]*\)?%?$'
             if re.match(numeric_pattern, cleaned_cell.replace(' ', '')):
@@ -152,20 +160,20 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     try:
         with open(filename, 'w') as f:
             f.write("Tag\tValue\tColumn Name\tSection\n")
-            
+
             company_info = data.get('company_info', {})
             f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\n")
             f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\n")
             f.write(f"Filing Date\t{company_info.get('filing_date', 'N/A')}\tN/A\tCompany Information\n")
             f.write(f"Report Date\t{company_info.get('report_date', 'N/A')}\tN/A\tCompany Information\n")
-            
+
             sections = {
                 'Income Statement': data.get('income_statement', []),
                 'Balance Sheet': data.get('balance_sheet', []),
                 'Cash Flow Statement': data.get('cash_flow', []),
                 'Key Financial Ratios': data.get('key_ratios', [])
             }
-            
+
             for section_name, items in sections.items():
                 for item in items:
                     column_name = item.get('column_name', 'N/A')
@@ -177,13 +185,13 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
 class SECFieldExtractor:
     def __init__(self, company_name: str, email: str):
         self.downloader = Downloader(company_name, email)
-        
+
     def _get_company_info(self, identifier: str, filing_metadata) -> Optional[CompanyInfo]:
         try:
             if not filing_metadata:
                 logger.error("Filing metadata is empty.")
                 return None
-                
+
             return CompanyInfo(
                 name=filing_metadata.company_name,
                 cik=filing_metadata.cik,
@@ -199,27 +207,27 @@ class SECFieldExtractor:
             logger.debug(f"Requesting latest 10-K filings for identifier: {identifier}")
             request = RequestedFilings(ticker_or_cik=identifier, form_type="10-K", limit=1)
             metadatas = self.downloader.get_filing_metadatas(request)
-            
+
             if not metadatas:
                 logger.error(f"No 10-K filings found for: {identifier}")
                 return None
-                
+
             metadata = metadatas[0]
             company_info = self._get_company_info(identifier, metadata)
-            
+
             if not company_info:
                 logger.error("Company information could not be retrieved.")
                 return None
-                
+
             logger.info(f"Processing 10-K for {company_info.name} (CIK: {company_info.cik})")
-            
+
             # Download and decode the HTML content
             html_content = self.downloader.download_filing(url=metadata.primary_doc_url).decode()
-            
+
             if not html_content:
                 logger.error("Downloaded HTML content is empty.")
                 return None
-                
+
             # Parse the HTML content using 'lxml' parser
             self.soup = BeautifulSoup(html_content, 'lxml')  # or 'xml' if appropriate
             financial_data = self.extract_financial_data()
@@ -230,7 +238,7 @@ class SECFieldExtractor:
                 'report_date': company_info.report_date
             }
             return financial_data
-                
+
         except Exception as e:
             logger.error(f"Error processing 10-K: {e}")
             return None
@@ -243,37 +251,39 @@ class SECFieldExtractor:
             'cash_flow': [],
             'key_ratios': []
         }
-    
+
         try:
             # Use more flexible table parsing options
-            tables = pd.read_html(StringIO(str(self.soup)), 
-                                flavor='bs4',
-                                thousands=',',  # Handle number formatting
-                                decimal='.',
-                                na_values=['', 'N/A', 'None'],
-                                keep_default_na=True)
-            
+            tables = pd.read_html(StringIO(str(self.soup)),
+                                   flavor='bs4',
+                                   thousands=',',  # Handle number formatting
+                                   decimal='.',
+                                   na_values=['', 'N/A', 'None'],
+                                   keep_default_na=True)
+
             logger.info(f"Found {len(tables)} tables in the document.")
-            
+
             # Print the first two raw tables for inspection
             for idx, df in enumerate(tables[:2], start=1):
                 print(f"\n--- Raw Table {idx} ---")
                 print(df.head())
                 print("----------------------\n")
-            
+
             for idx, df in enumerate(tables, start=1):
                 # Apply preprocessing to clean and structure the table
                 df = preprocess_table(df)
-                
+
                 # Log the DataFrame shape and columns for debugging
                 logger.debug(f"Table {idx} shape: {df.shape} | Columns: {df.columns.tolist()}")
-                
+
                 # Identify the table type based on content
                 table_text = df.to_string().lower()
 
                 income_keywords = ['income', 'revenue', 'net income', 'operating income']
-                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities', "shareholders’ equity", "shareholders' equity"]
-                cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities', 'financing activities', 'net cash']
+                balance_keywords = ['assets', 'liabilities', 'equity', 'total assets', 'total liabilities',
+                                    "shareholders’ equity", "shareholders' equity"]
+                cash_flow_keywords = ['cash flow', 'operating activities', 'investing activities',
+                                      'financing activities', 'net cash']
 
                 if any(keyword in table_text for keyword in income_keywords):
                     section = 'Income Statement'
@@ -283,25 +293,25 @@ class SECFieldExtractor:
                     section = 'Cash Flow Statement'
                 else:
                     section = 'Key Financial Ratios'
-                
+
                 logger.info(f"Table {idx}: Classified as '{section}'")
-                
+
                 # Improved row parsing with header context
                 for row_idx, row in df.iterrows():
                     # Skip rows that are likely sub-headers
                     if row.astype(str).str.contains('Year|Month|Period|Date', case=False).any():
                         continue
-                        
+
                     row_data = parse_table_row(row.tolist(), df.columns.tolist())
                     if row_data:
                         # Store data in appropriate section
                         section_key = section.lower().replace(' ', '_')
                         if section_key in data:
                             data[section_key].append(row_data)
-                            
+
         except Exception as e:
             logger.error(f"Error processing tables: {e}")
-            
+
         return data
 
 def main():
@@ -311,14 +321,14 @@ def main():
         print("  python relevant.py AAPL MyCompany your.email@example.com")
         print("  python relevant.py 320193 MyCompany your.email@example.com")
         sys.exit(1)
-        
+
     identifier = sys.argv[1]
     company_name = sys.argv[2]
     email = sys.argv[3]
-    
+
     extractor = SECFieldExtractor(company_name, email)
     data = extractor.get_latest_10k_fields(identifier)
-    
+
     if data:
         save_fields_to_tsv(data)
         logger.info("Data extraction complete. Results saved to sec_fields.tsv")
