@@ -59,63 +59,6 @@ def preprocess_table(df):
     
     return df
 
-def extract_financial_data(self) -> Dict[str, Any]:
-    """Extract key financial data from the document with table parsing."""
-    data = {
-        'income_statement': [],
-        'balance_sheet': [],
-        'cash_flow': [],
-        'key_ratios': []
-    }
-
-    try:
-        # Use more flexible table parsing options
-        tables = pd.read_html(StringIO(str(self.soup)), 
-                            flavor='bs4',
-                            thousands=',',  # Handle number formatting
-                            decimal='.',
-                            na_values=['', 'N/A', 'None'],
-                            keep_default_na=True)
-        
-        logger.info(f"Found {len(tables)} tables in the document.")
-        
-        for idx, df in enumerate(tables, start=1):
-            # Apply preprocessing to clean and structure the table
-            df = preprocess_table(df)
-            
-            # Identify the table type based on content
-            table_text = df.to_string().lower()
-            
-            # Classification logic remains the same...
-            if any(keyword in table_text for keyword in income_keywords):
-                section = 'Income Statement'
-            elif any(keyword in table_text for keyword in balance_keywords):
-                section = 'Balance Sheet'
-            elif any(keyword in table_text for keyword in cash_flow_keywords):
-                section = 'Cash Flow Statement'
-            else:
-                section = 'Key Financial Ratios'
-            
-            logger.info(f"Table {idx}: Classified as '{section}'")
-            
-            # Improved row parsing with header context
-            for idx, row in df.iterrows():
-                # Skip rows that are likely sub-headers
-                if row.astype(str).str.contains('Year|Month|Period|Date', case=False).any():
-                    continue
-                    
-                row_data = parse_table_row(row.tolist(), df.columns.tolist())
-                if row_data:
-                    # Store data in appropriate section
-                    section_key = section.lower().replace(' ', '_')
-                    if section_key in data:
-                        data[section_key].append(row_data)
-                        
-    except Exception as e:
-        logger.error(f"Error processing tables: {e}")
-        
-    return data
-
 def parse_table_row(row: List[str], headers: List[str]) -> Optional[Dict[str, Any]]:
     """Parse a table row with improved header handling."""
     if not headers or not row or len(row) < 2:
@@ -246,6 +189,63 @@ class SECFieldExtractor:
         except Exception as e:
             logger.error(f"Error processing 10-K: {e}")
             return None
+    
+    def extract_financial_data(self) -> Dict[str, Any]:
+        """Extract key financial data from the document with table parsing."""
+        data = {
+            'income_statement': [],
+            'balance_sheet': [],
+            'cash_flow': [],
+            'key_ratios': []
+        }
+    
+        try:
+            # Use more flexible table parsing options
+            tables = pd.read_html(StringIO(str(self.soup)), 
+                                flavor='bs4',
+                                thousands=',',  # Handle number formatting
+                                decimal='.',
+                                na_values=['', 'N/A', 'None'],
+                                keep_default_na=True)
+            
+            logger.info(f"Found {len(tables)} tables in the document.")
+            
+            for idx, df in enumerate(tables, start=1):
+                # Apply preprocessing to clean and structure the table
+                df = preprocess_table(df)
+                
+                # Identify the table type based on content
+                table_text = df.to_string().lower()
+                
+                # Classification logic remains the same...
+                if any(keyword in table_text for keyword in income_keywords):
+                    section = 'Income Statement'
+                elif any(keyword in table_text for keyword in balance_keywords):
+                    section = 'Balance Sheet'
+                elif any(keyword in table_text for keyword in cash_flow_keywords):
+                    section = 'Cash Flow Statement'
+                else:
+                    section = 'Key Financial Ratios'
+                
+                logger.info(f"Table {idx}: Classified as '{section}'")
+                
+                # Improved row parsing with header context
+                for idx, row in df.iterrows():
+                    # Skip rows that are likely sub-headers
+                    if row.astype(str).str.contains('Year|Month|Period|Date', case=False).any():
+                        continue
+                        
+                    row_data = parse_table_row(row.tolist(), df.columns.tolist())
+                    if row_data:
+                        # Store data in appropriate section
+                        section_key = section.lower().replace(' ', '_')
+                        if section_key in data:
+                            data[section_key].append(row_data)
+                            
+        except Exception as e:
+            logger.error(f"Error processing tables: {e}")
+            
+        return data
 
 def main():
     if len(sys.argv) != 4:
