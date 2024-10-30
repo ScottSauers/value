@@ -1,31 +1,17 @@
 import finagg
 import pandas as pd
+import numpy as np
 from datetime import datetime
 import logging
 from pathlib import Path
 from typing import Optional, Tuple, Dict
-from dataclasses import dataclass
+import warnings
 
-@dataclass
-class TimeInterval:
-    """Represents a time interval for price data collection."""
-    interval: str
-    description: str
+# Filter out yfinance FutureWarnings
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 class PriceDataExtractor:
-    """Extracts historical price data using multiple sources and intervals."""
-    
-    # Define available time intervals, fix later
-  
-    INTERVALS = [
-        TimeInterval("1d", "Daily data"),
-        TimeInterval("1wk", "Weekly data"),
-        TimeInterval("1mo", "Monthly data"),
-        TimeInterval("1h", "Hourly data"),
-        TimeInterval("5m", "5-minute data"),
-        TimeInterval("2m", "2-minute data"),
-        TimeInterval("1m", "1-minute data")
-    ]
+    """Extracts historical price data using yfinance integration."""
 
     def __init__(self, output_dir: str = "./data"):
         """Initialize the price data extractor."""
@@ -42,6 +28,38 @@ class PriceDataExtractor:
         )
         self.logger = logging.getLogger(__name__)
 
+    def _preprocess_dataframe(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        """
+        Preprocess the price dataframe to ensure consistent format.
+        
+        Args:
+            df: Raw price DataFrame
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Processed DataFrame with consistent format
+        """
+        # Ensure date column is datetime
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Ensure all numeric columns are float64
+        numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = df[col].astype(np.float64)
+        
+        # Handle volume as int64
+        if 'volume' in df.columns:
+            df['volume'] = df['volume'].astype(np.int64)
+        
+        # Sort by date
+        df = df.sort_values('date', ascending=True)
+        
+        # Remove any duplicates
+        df = df.drop_duplicates(subset=['date'], keep='last')
+        
+        return df
+
     def get_price_data(self, ticker: str, interval: str = "1d") -> pd.DataFrame:
         """
         Retrieve historical price data for a ticker.
@@ -54,24 +72,16 @@ class PriceDataExtractor:
             DataFrame containing historical price data
         """
         try:
-            # First try the refined data
-            try:
-                if interval == "1d":
+            # Only try refined data for daily interval
+            if interval == "1d":
+                try:
                     df = finagg.yfinance.feat.daily.from_refined(ticker)
                     self.logger.info(f"Retrieved refined daily data for {ticker}")
-                    return df
-            except Exception as e:
-                self.logger.warning(f"Failed to get refined data for {ticker}: {str(e)}")
+                    return self._preprocess_dataframe(df, ticker)
+                except Exception as e:
+                    self.logger.debug(f"No refined data available for {ticker}: {str(e)}")
 
-            # Then try raw data
-            try:
-                df = finagg.yfinance.feat.prices.from_raw(ticker)
-                self.logger.info(f"Retrieved raw data for {ticker}")
-                return df
-            except Exception as e:
-                self.logger.warning(f"Failed to get raw data for {ticker}: {str(e)}")
-
-            # Finally, try API directly
+            # Get data from API
             df = finagg.yfinance.api.get(
                 ticker,
                 interval=interval,
@@ -80,7 +90,8 @@ class PriceDataExtractor:
             
             if df.empty:
                 raise ValueError(f"No price data found for {ticker}")
-                
+            
+            df = self._preprocess_dataframe(df, ticker)
             self.logger.info(f"Retrieved API data for {ticker} with interval {interval}")
             return df
             
@@ -88,7 +99,7 @@ class PriceDataExtractor:
             self.logger.error(f"Failed to retrieve price data for {ticker}: {str(e)}")
             raise
 
-    def save_data(self, df: pd.DataFrame, ticker: str, interval: str, metadata: Dict) -> Tuple[str, str]:
+    def save_data(self, df: pd.DataFrame, ticker: str, interval: str) -> Tuple[str, str]:
         """
         Save the price data and metadata to files.
         
@@ -96,23 +107,47 @@ class PriceDataExtractor:
             df: DataFrame to save
             ticker: Stock ticker symbol
             interval: Time interval of the data
-            metadata: Dictionary of metadata about the extraction
             
         Returns:
             Tuple of (data filepath, metadata filepath)
         """
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
+        # Prepare statistics for metadata
+        stats = {
+            'ticker': ticker,
+            'interval': interval,
+            'extraction_date': datetime.now().isoformat(),
+            'date_range': {
+                'start': df['date'].min().isoformat(),
+                'end': df['date'].max().isoformat()
+            },
+            'rows': len(df),
+            'trading_days': len(df['date'].unique()),
+            'price_range': {
+                'min': float(df['low'].min()),
+                'max': float(df['high'].max())
+            },
+            'volume_stats': {
+                'total': int(df['volume'].sum()),
+                'mean': float(df['volume'].mean()),
+                'median': float(df['volume'].median())
+            }
+        }
+        
         # Save price data
         data_filename = f"{ticker}_prices_{interval}_{timestamp}.tsv"
         data_filepath = self.output_dir / data_filename
-        df.to_csv(data_filepath, sep='\t', index=False)
+        
+        # Convert date to ISO format before saving
+        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+        df.to_csv(data_filepath, sep='\t', index=False, float_format='%.8f')
         self.logger.info(f"Price data saved to {data_filepath}")
         
         # Save metadata
         metadata_filename = f"{ticker}_prices_{interval}_{timestamp}.json"
         metadata_filepath = self.output_dir / metadata_filename
-        pd.Series(metadata).to_json(metadata_filepath)
+        pd.Series(stats).to_json(metadata_filepath)
         self.logger.info(f"Metadata saved to {metadata_filepath}")
         
         return str(data_filepath), str(metadata_filepath)
@@ -135,27 +170,11 @@ class PriceDataExtractor:
         
         for interval in intervals:
             try:
-                # Get price data
+                # Get and process price data
                 df = self.get_price_data(ticker, interval)
                 
-                # Prepare metadata
-                metadata = {
-                    'ticker': ticker,
-                    'interval': interval,
-                    'extraction_date': datetime.now().isoformat(),
-                    'start_date': df['date'].min(),
-                    'end_date': df['date'].max(),
-                    'total_rows': len(df),
-                    'columns': list(df.columns),
-                    'data_sources_tried': [
-                        'refined' if interval == "1d" else None,
-                        'raw',
-                        'api'
-                    ]
-                }
-                
                 # Save data and metadata
-                data_file, metadata_file = self.save_data(df, ticker, interval, metadata)
+                data_file, metadata_file = self.save_data(df, ticker, interval)
                 results[interval] = (data_file, metadata_file)
                 
             except Exception as e:
@@ -168,11 +187,11 @@ def main():
     """Main execution function."""
     extractor = PriceDataExtractor()
     
-    # List of tickers to process
-    tickers = ["AAPL"]
-    
-    # List of intervals to collect
+    # Configure intervals - stick to the most reliable ones
     intervals = ["1d", "1wk", "1mo"]
+    
+    # List of tickers to process
+    tickers = ["AAPL"]  # Expand this list as needed
     
     for ticker in tickers:
         try:
