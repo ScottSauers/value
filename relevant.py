@@ -22,7 +22,11 @@ class CompanyInfo:
 
 def clean_text(text: Any) -> str:
     """Clean text by removing extra whitespace and special characters."""
-    return ' '.join(str(text).split()).strip()
+    # Convert non-string types to string, then clean
+    if not isinstance(text, str):
+        text = str(text)
+    return ' '.join(text.split()).strip()
+
 
 def extract_years_from_string(s: str) -> List[str]:
     """Extract four-digit years from a string."""
