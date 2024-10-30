@@ -77,18 +77,27 @@ class MarketCapScreener:
     def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get data for a single ticker with proper rate limiting."""
         try:
-            # Use session for automatic rate limiting and caching
-            ticker_obj = yf.Ticker(ticker, session=self.session)
-            info = ticker_obj.info
-            hist = ticker_obj.history(period="5d")
+            # Add small delay between requests
+            time.sleep(0.1)
             
-            if not info:  # Only check if we got any info at all
+            # Use the finagg API for basic price data
+            try:
+                price_data = finagg.yfinance.api.get(ticker, period="5d")
+                if price_data.empty:
+                    return None
+                latest_price = price_data['close'].iloc[-1]
+                avg_volume = price_data['volume'].mean()
+            except Exception as e:
+                self.logger.debug(f"Failed to get finagg data for {ticker}: {str(e)}")
                 return None
                 
-            latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
-            avg_price = hist['Close'].mean() if not hist.empty else latest_price
-            avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
+            # Use yfinance for additional info
+            ticker_obj = yf.Ticker(ticker, session=self.session)
+            info = ticker_obj.info
             
+            if not info:
+                return None
+                
             # Get market cap directly or calculate it
             market_cap = info.get('marketCap')
             if market_cap is None and latest_price is not None and info.get('sharesOutstanding') is not None:
@@ -100,14 +109,14 @@ class MarketCapScreener:
                 return None
                 
             result = {
+                'ticker': ticker,
                 'price': latest_price,
-                'volume': info.get('volume', 0),
-                'avg_volume': avg_volume,
+                'volume': avg_volume,  # Use averaged volume from price data
                 'shares_outstanding': info.get('sharesOutstanding'),
                 'market_cap': market_cap,
-                'high': info.get('dayHigh'),
-                'low': info.get('dayLow'),
-                'open': info.get('open')
+                'high': price_data['high'].iloc[-1] if not price_data.empty else None,
+                'low': price_data['low'].iloc[-1] if not price_data.empty else None,
+                'open': price_data['open'].iloc[-1] if not price_data.empty else None
             }
             
             return result
@@ -184,6 +193,8 @@ class MarketCapScreener:
             major_exchanges = ['NYSE', 'Nasdaq', 'NYSE Arca', 'NYSE American']
             df = df[df['exchange'].isin(major_exchanges)]
             df = df[df['name'].notna()]
+            # Exclude tickers with special characters but keep the regex pattern valid
+            df = df[~df['ticker'].str.contains(r'[\^$]')]  # Fixed regex pattern
             df = df[df['ticker'].str.len() <= 5]
             
             self._save_cache(df, 'exchanges')
