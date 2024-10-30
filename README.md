@@ -180,7 +180,7 @@ Let $w$ be our vector of portfolio weights (what we're solving for). We need two
 
 where $R_{it}$ is the realized return of asset $i$ at time $t$, $T$ is the number of historical observations, and $\bar{R}_i$ is the mean historical return of asset $i$.
 
-Then, we can apply Ledoit-Wolf shrinkage to the covariance matrix. Or: https://arxiv.org/pdf/1808.10188.
+Then, we can apply [Ollila-Raninen shrinkage]([url](https://arxiv.org/pdf/1808.10188)) to the covariance matrix.
 
 To generate the efficient frontier, we solve:
 
