@@ -151,63 +151,63 @@ class MarketCapScreener:
             self.logger.error(f"Failed to get exchange data: {str(e)}")
             raise
 
-    def get_stock_data_batch(self, tickers: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Get stock data for multiple tickers with true parallelization."""
-        results = {}
-        futures = []
-        
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit each ticker for parallel processing
-            for ticker in tickers:
-                futures.append((ticker, executor.submit(self._get_single_ticker_data, ticker)))
-                
-            # Collect results as they complete
-            for ticker, future in futures:
-                try:
-                    data = future.result()
-                    if data:
-                        results[ticker] = data
-                except Exception as e:
-                    self.logger.debug(f"Error processing {ticker}: {str(e)}")
-                    self.stats['errors']['processing'] += 1
-                    
-        return results
-
-        def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
-            """Get data for a single ticker with proper rate limiting."""
+def get_stock_data_batch(self, tickers: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Get stock data for multiple tickers with true parallelization."""
+    results = {}
+    futures = []
+    
+    with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        # Submit each ticker for parallel processing
+        for ticker in tickers:
+            futures.append((ticker, executor.submit(self._get_single_ticker_data, ticker)))
+            
+        # Collect results as they complete
+        for ticker, future in futures:
             try:
-                # Use session for automatic rate limiting and caching
-                ticker_obj = yf.Ticker(ticker, session=self.session)
-                info = ticker_obj.info
-                hist = ticker_obj.history(period="5d")
-                
-                if not info or hist.empty:
-                    return None
-                    
-                latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
-                avg_price = hist['Close'].mean() if not hist.empty else latest_price
-                avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
-                
-                result = {
-                    'price': latest_price,
-                    'volume': info.get('volume', 0),
-                    'avg_volume': avg_volume,
-                    'shares_outstanding': info.get('sharesOutstanding'),
-                    'market_cap': info.get('marketCap'),
-                    'high': info.get('dayHigh'),
-                    'low': info.get('dayLow'),
-                    'open': info.get('open')
-                }
-                
-                # Basic validation
-                if not all(v is not None for v in result.values()):
-                    return None
-                    
-                return result
-                
+                data = future.result()
+                if data:
+                    results[ticker] = data
             except Exception as e:
-                self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
+                self.logger.debug(f"Error processing {ticker}: {str(e)}")
+                self.stats['errors']['processing'] += 1
+                
+    return results
+
+    def _get_single_ticker_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Get data for a single ticker with proper rate limiting."""
+        try:
+            # Use session for automatic rate limiting and caching
+            ticker_obj = yf.Ticker(ticker, session=self.session)
+            info = ticker_obj.info
+            hist = ticker_obj.history(period="5d")
+            
+            if not info or hist.empty:
                 return None
+                
+            latest_price = hist['Close'].iloc[-1] if not hist.empty else info.get('currentPrice')
+            avg_price = hist['Close'].mean() if not hist.empty else latest_price
+            avg_volume = hist['Volume'].mean() if not hist.empty else info.get('volume', 0)
+            
+            result = {
+                'price': latest_price,
+                'volume': info.get('volume', 0),
+                'avg_volume': avg_volume,
+                'shares_outstanding': info.get('sharesOutstanding'),
+                'market_cap': info.get('marketCap'),
+                'high': info.get('dayHigh'),
+                'low': info.get('dayLow'),
+                'open': info.get('open')
+            }
+            
+            # Basic validation
+            if not all(v is not None for v in result.values()):
+                return None
+                
+            return result
+            
+        except Exception as e:
+            self.logger.debug(f"Error getting data for {ticker}: {str(e)}")
+            return None
 
     def process_batch(self, batch_tickers: List[str]) -> List[Dict]:
         """Process a batch of tickers in parallel with proper error handling."""
