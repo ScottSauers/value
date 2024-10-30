@@ -2,8 +2,6 @@
 
 import logging
 from typing import Any, Dict, List
-from bs4 import BeautifulSoup
-from dataclasses import dataclass
 import re
 import pandas as pd
 from io import StringIO
@@ -150,7 +148,7 @@ def classify_table(df: pd.DataFrame) -> str:
 def parse_table_row(row: List[str], headers: List[str]) -> List[Dict[str, Any]]:
     """
     Parse a table row to extract all label-value pairs.
-    
+
     Returns a list of dictionaries, each containing:
     - label: The financial metric label.
     - value: The numeric value.
@@ -271,7 +269,14 @@ def save_fields_to_tsv(data: Dict[str, Any], filename: str = "sec_fields.tsv"):
     try:
         with open(filename, 'a') as f:  # Changed to append mode
             company_info = data.get('company_info', {})
-            
+
+            # Write Company Information only once per filing
+            if 'Company Information' not in f.read():
+                # Write headers if file is empty
+                f.seek(0, 2)  # Move to the end of the file
+                if f.tell() == 0:
+                    f.write("Tag\tValue\tColumn Name\tSection\tForm Type\tFiling Date\n")
+
             # Write Company Information
             f.write(f"Company Name\t{company_info.get('name', 'N/A')}\tN/A\tCompany Information\t{company_info.get('form_type', 'N/A')}\t{company_info.get('filing_date_actual', 'N/A')}\n")
             f.write(f"CIK\t{company_info.get('cik', 'N/A')}\tN/A\tCompany Information\t{company_info.get('form_type', 'N/A')}\t{company_info.get('filing_date_actual', 'N/A')}\n")
