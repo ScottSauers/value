@@ -1,12 +1,11 @@
 # finder.py
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sec_downloader import Downloader
 from sec_downloader.types import RequestedFilings
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-import sys
 import re
 import warnings
 from bs4 import XMLParsedAsHTMLWarning
@@ -54,38 +53,68 @@ class SECFieldExtractor:
             document_url=filing_metadata.primary_doc_url if hasattr(filing_metadata, 'primary_doc_url') else 'N/A'
         )
     
-    def get_latest_10k_fields(self, identifier: str) -> Optional[Dict[str, Any]]:
+    def get_latest_fields(
+        self, 
+        identifier: str, 
+        form_types: List[str], 
+        limit: int
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Fetch the latest filings based on form types and limit.
+
+        Args:
+            identifier (str): CIK or ticker symbol.
+            form_types (List[str]): List of form types to fetch (e.g., ["10-K", "10-Q"]).
+            limit (int): Total number of filings to fetch.
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: List of dictionaries containing company_info and html_content.
+        """
         try:
-            logger.debug(f"Requesting latest 10-K filings for identifier: {identifier}")
-            request = RequestedFilings(ticker_or_cik=identifier, form_type="10-K", limit=1)
+            logger.debug(f"Requesting latest filings for identifier: {identifier} with form types: {form_types} and limit: {limit}")
+            # Create a combined request for all specified form types
+            request = RequestedFilings(
+                ticker_or_cik=identifier, 
+                form_type=form_types, 
+                limit=limit
+            )
             metadatas = self.downloader.get_filing_metadatas(request)
     
             if not metadatas:
-                logger.error(f"No 10-K filings found for: {identifier}")
+                logger.error(f"No filings found for: {identifier} with form types: {form_types}")
                 return None
     
-            metadata = metadatas[0]
-            company_info = self._get_company_info(identifier, metadata)
+            results = []
+            for metadata in metadatas:
+                company_info = self._get_company_info(identifier, metadata)
     
-            if not company_info:
-                logger.error("Company information could not be retrieved.")
+                if not company_info:
+                    logger.error("Company information could not be retrieved for a filing.")
+                    continue
+    
+                logger.info(f"Processing {metadata.form_type} for {company_info.name} (CIK: {company_info.cik})")
+    
+                # Download and decode the HTML content
+                html_content = self.downloader.download_filing(url=metadata.primary_doc_url).decode()
+    
+                if not html_content:
+                    logger.error("Downloaded HTML content is empty.")
+                    continue
+    
+                # Append the result
+                results.append({
+                    'company_info': company_info,
+                    'html_content': html_content,
+                    'form_type': metadata.form_type,
+                    'filing_date': metadata.filing_date
+                })
+    
+            if not results:
+                logger.error("No valid filings were processed.")
                 return None
     
-            logger.info(f"Processing 10-K for {company_info.name} (CIK: {company_info.cik})")
-    
-            # Download and decode the HTML content
-            html_content = self.downloader.download_filing(url=metadata.primary_doc_url).decode()
-    
-            if not html_content:
-                logger.error("Downloaded HTML content is empty.")
-                return None
-    
-            # Return company_info and html_content
-            return {
-                'company_info': company_info,
-                'html_content': html_content
-            }
+            return results
     
         except Exception as e:
-            logger.error(f"Error processing 10-K: {e}")
+            logger.error(f"Error processing filings: {e}")
             return None
