@@ -298,22 +298,6 @@ class MarketCapScreener:
         
         return display_df[cols]
 
-    def validate_market_cap(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Additional validation for market cap data."""
-        validated = df.copy()
-        
-        # Remove obvious errors
-        validated = validated[
-            (validated['market_cap'] > 0) &  # Must be positive
-            (validated['market_cap'] < 1e15) &  # Reasonable upper limit
-            (validated['shares_outstanding'] > 1000) &  # Minimum shares
-            (validated['shares_outstanding'] < 1e11) &  # Maximum shares
-            (validated['price'] > 0.01) &  # Minimum price
-            (validated['price'] < 1e5)  # Maximum price
-        ]
-        
-        return validated
-
     def screen_small_caps(self, max_market_cap: float = 50_000_000) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Screen for small cap stocks with improved caching and validation."""
         try:
@@ -382,9 +366,9 @@ class MarketCapScreener:
         
         return small_caps, all_stocks_df
         
-    except Exception as e:
-        self.logger.error(f"Screening failed: {str(e)}")
-            raise
+        except Exception as e:
+            self.logger.error(f"Screening failed: {str(e)}")
+                raise
 
     def validate_market_cap(self, df: pd.DataFrame) -> pd.DataFrame:
         """Comprehensive market cap validation."""
