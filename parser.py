@@ -265,25 +265,25 @@ def extract_financial_data(html_content: str) -> Dict[str, Any]:
     return data
 
 def save_fields_to_tsv(data: Dict[str, Any], filename: Optional[str] = None):
-    """Save fields to a uniquely named TSV file."""
+    """Save fields to a uniquely named TSV file with the ticker in the filename."""
     try:
         company_info = data.get('company_info', {})
         form_type = company_info.get('form_type', 'N/A')
         filing_date = company_info.get('filing_date_actual', 'N/A')
-
-        # Generate a unique and informative filename
-        # Format: <CIK>_<FormType>_<FilingDate>.tsv
+        ticker = company_info.get('ticker', 'UnknownTicker')
         cik = company_info.get('cik', 'UnknownCIK')
+
         # Format filing_date as YYYY-MM-DD if possible
         if isinstance(filing_date, str) and len(filing_date) >= 10:
             filing_date_formatted = filing_date[:10].replace('/', '-').replace('.', '-')
         else:
             filing_date_formatted = filing_date.replace('/', '-').replace('.', '-')
 
-        # Sanitize form_type to remove any characters that might not be suitable for filenames
+        # Sanitize form_type to remove any characters unsuitable for filenames
         form_type_sanitized = re.sub(r'[^\w\-]', '_', form_type)
 
-        filename = f"{cik}_{form_type_sanitized}_{filing_date_formatted}.tsv"
+        # Construct the filename to include ticker, CIK, form type, and filing date
+        filename = f"{ticker}_{cik}_{form_type_sanitized}_{filing_date_formatted}.tsv"
 
         logger.debug(f"Saving data to {filename}")
 
