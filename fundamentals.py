@@ -1,3 +1,4 @@
+import os
 import finagg
 import pandas as pd
 from datetime import datetime
