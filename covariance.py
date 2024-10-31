@@ -26,11 +26,8 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
             df = pd.read_csv(file_path, sep='\t')
         else:
             df = pd.read_csv(file_path)
-        
+            
         df['date'] = pd.to_datetime(df['date'])
-        
-        debug_print("Initial dataframe:", df)
-        debug_print("Columns:", df.columns.tolist())
         
         df = df[df['date'] >= start_date].copy()
         debug_print(f"After filtering to start_date {start_date}:", df)
@@ -61,39 +58,29 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
             'total_dates': len(df)
         }
         
-        companies_to_remove = set()
-        total_companies = len(companies_with_data)
+        df_companies = df[companies_with_data]
         threshold = 0.1
+        companies_to_remove = set()
         
         for company in companies_with_data:
-            missing_ratios = []
-            for date in df['date'].unique():
-                day_data = df[df['date'] == date][companies_with_data]
-                present_companies = day_data.notna().sum()
-                max_present = present_companies.max()
-                if max_present > 0:
-                    company_present = day_data[company].notna().sum()
-                    if company_present == 0 and (present_companies / total_companies > (1 - threshold)):
-                        companies_to_remove.add(company)
-                        break
-        
-        debug_print(f"Companies to remove: {len(companies_to_remove)}")
+            missing = df_companies[company].isna()
+            if missing.any():
+                others = df_companies.drop(columns=[company]).notna().any(axis=1)
+                if (missing & others).sum() / len(others) > threshold:
+                    companies_to_remove.add(company)
+                    debug_print(f"Removing {company}: too many missing values when others present")
         
         clean_companies = [c for c in companies_with_data if c not in companies_to_remove]
-        debug_print("Clean companies remaining:", clean_companies)
+        debug_print(f"Companies remaining: {len(clean_companies)}")
         
         if clean_companies:
             df_clean = df[['date'] + clean_companies].copy()
-            debug_print("Clean dataframe shape:", df_clean.shape)
         else:
             df_clean = df[['date']].copy()
-            debug_print("WARNING: No clean companies remain!")
         
         stats['removed_companies'] = list(companies_to_remove)
         stats['final_companies'] = len(clean_companies)
         stats['removal_percentage'] = (len(companies_to_remove) / stats['initial_companies'] * 100)
-        
-        debug_print("Final statistics:", stats)
         
         return df_clean, stats
         
@@ -105,19 +92,14 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     debug_print("Starting covariance calculation")
     
     price_columns = [col for col in df.columns if col.endswith('_close')]
-    debug_print("Price columns for covariance:", price_columns)
     
     if not price_columns:
         raise ValueError("No valid price columns found after cleaning")
     
     returns = df[price_columns].pct_change()
-    debug_print("Returns calculation:", returns)
-    
     returns_clean = returns.dropna()
-    debug_print("Clean returns shape:", returns_clean.shape)
     
     cov_matrix = returns_clean.cov()
-    debug_print("Covariance matrix shape:", cov_matrix.shape)
     
     cov_matrix.columns = [col.replace('_close', '') for col in cov_matrix.columns]
     cov_matrix.index = [col.replace('_close', '') for col in cov_matrix.index]
