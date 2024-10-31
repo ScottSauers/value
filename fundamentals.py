@@ -215,8 +215,14 @@ class SECDataExtractor:
             cache_df['taxonomy'] = concept.taxonomy
             cache_df['units'] = concept.units
             
-            # Insert data into cache
-            cache_df.to_sql('concept_cache', conn, if_exists='replace', 
+            # Delete existing data for this ticker and concept
+            conn.execute('''
+                DELETE FROM concept_cache 
+                WHERE ticker = ? AND concept_tag = ?
+            ''', (ticker, concept.tag))
+            
+            # Insert new data
+            cache_df.to_sql('concept_cache', conn, if_exists='append', 
                            index=False, method='multi')
             
             # Update status
