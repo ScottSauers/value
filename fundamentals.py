@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 from dataclasses import dataclass
 from dotenv import load_dotenv
+from ratelimiter import RateLimiter  # Imported for rate limiting
 
 @dataclass
 class SECConcept:
@@ -115,6 +116,9 @@ class SECDataExtractor:
         SECConcept("RevenueRemainingPerformanceObligation")
     ]
 
+    # Initialize a RateLimiter with a global rate limit of 5 requests per second
+    rate_limiter = RateLimiter(max_calls=5, period=1)
+
     def __init__(self, output_dir: str = "./data"):
         """Initialize the extractor with output directory."""
         load_dotenv()
@@ -139,6 +143,27 @@ class SECDataExtractor:
         )
         self.logger = logging.getLogger(__name__)
 
+    def rate_limited_get(self, tag: str, ticker: str, taxonomy: str, units: str) -> pd.DataFrame:
+        """
+        Wrapper for the finagg.sec.api.company_concept.get method with rate limiting.
+        
+        Args:
+            tag: SEC concept tag
+            ticker: Stock ticker symbol
+            taxonomy: Taxonomy to use
+            units: Units of the concept
+            
+        Returns:
+            DataFrame containing the concept data
+        """
+        with self.rate_limiter:
+            return finagg.sec.api.company_concept.get(
+                tag,
+                ticker=ticker,
+                taxonomy=taxonomy,
+                units=units
+            )
+
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """
         Retrieve comprehensive SEC fundamental data for a ticker.
@@ -153,7 +178,7 @@ class SECDataExtractor:
         
         for concept in self.SEC_CONCEPTS:
             try:
-                df = finagg.sec.api.company_concept.get(
+                df = self.rate_limited_get(
                     concept.tag,
                     ticker=ticker,
                     taxonomy=concept.taxonomy,
