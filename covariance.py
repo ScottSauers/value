@@ -7,20 +7,17 @@ from datetime import datetime
 def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame, dict]:
     """
     Load price data and process it according to specifications.
-    
-    Args:
-        file_path: Path to the price data CSV/TSV file
-        start_date: Date string to start analysis from (YYYY-MM-DD)
-        
-    Returns:
-        tuple: (Processed DataFrame with complete data, Statistics dictionary)
+    Only removes companies that have missing data when others have valid data.
     """
     try:
-        # Read the file with explicit date column
+        # Read the file
         if str(file_path).endswith('.tsv'):
-            df = pd.read_csv(file_path, sep='\t', parse_dates=['date'])
+            df = pd.read_csv(file_path, sep='\t')
         else:
-            df = pd.read_csv(file_path, parse_dates=['date'])
+            df = pd.read_csv(file_path)
+        
+        # Convert date column
+        df['date'] = pd.to_datetime(df['date'])
         
         # Filter data after start date
         df = df[df['date'] >= start_date].copy()
@@ -28,49 +25,45 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         if df.empty:
             raise ValueError(f"No data found after {start_date}")
         
-        # Get list of all companies (columns that end with '_close')
-        companies = [col for col in df.columns if col.endswith('_close')]
-        initial_company_count = len(companies)
+        # Get list of companies that actually have data (any non-null values)
+        price_cols = [col for col in df.columns if col.endswith('_close')]
+        active_companies = [col for col in price_cols if df[col].notna().any()]
+        initial_company_count = len(active_companies)
         
-        if not companies:
-            raise ValueError(f"No price columns found (columns ending with '_close')")
-        
+        if not active_companies:
+            raise ValueError(f"No companies with valid price data found")
+            
         # Initialize statistics
         stats = {
             'initial_companies': initial_company_count,
             'removed_companies': [],
             'final_companies': 0,
-            'removal_percentage': 0.0,
             'date_range': (df['date'].min(), df['date'].max()),
             'total_dates': len(df)
         }
         
-        # Find rows where at least one company has data
-        valid_rows = df[companies].notna().any(axis=1)
+        # For each date, get companies that have data
+        companies_to_remove = set()
+        dates_with_data = df[df[active_companies].notna().any(axis=1)].date
         
-        # For each valid row, check which companies have missing data
-        companies_to_remove = []
-        for company in companies:
-            other_companies = [c for c in companies if c != company]
+        for company in active_companies:
+            company_data = df[df.date.isin(dates_with_data)][company]
+            other_companies = [c for c in active_companies if c != company]
             
-            # For each row where other companies have data
-            for idx in df[valid_rows].index:
-                if pd.isna(df.at[idx, company]) and df.loc[idx, other_companies].notna().any():
-                    companies_to_remove.append(company)
-                    break
-        
-        # Remove duplicates
-        companies_to_remove = list(set(companies_to_remove))
+            for date, value in company_data.items():
+                # If this company is missing data but others have it for this date
+                if pd.isna(value):
+                    row_data = df.loc[date, other_companies]
+                    if row_data.notna().any():
+                        companies_to_remove.add(company)
+                        break
         
         # Keep only clean companies
-        clean_companies = [c for c in companies if c not in companies_to_remove]
-        if clean_companies:
-            df_clean = df[['date'] + clean_companies].copy()
-        else:
-            df_clean = df[['date']].copy()
+        clean_companies = [c for c in active_companies if c not in companies_to_remove]
+        df_clean = df[['date'] + clean_companies].copy()
         
         # Update statistics
-        stats['removed_companies'] = companies_to_remove
+        stats['removed_companies'] = list(companies_to_remove)
         stats['final_companies'] = len(clean_companies)
         stats['removal_percentage'] = (len(companies_to_remove) / initial_company_count) * 100
         
@@ -81,28 +74,20 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         raise
 
 def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate the covariance matrix for the cleaned price data.
-    
-    Args:
-        df: Cleaned DataFrame with only complete data
-        
-    Returns:
-        pd.DataFrame: Covariance matrix
-    """
+    """Calculate the covariance matrix for the cleaned price data."""
     # Get price columns (ending with _close)
     price_columns = [col for col in df.columns if col.endswith('_close')]
     
     if not price_columns:
         raise ValueError("No valid price columns found after cleaning")
     
-    # Calculate returns (handle NA values appropriately)
+    # Calculate returns
     returns = df[price_columns].pct_change().dropna()
     
     # Calculate covariance matrix
     cov_matrix = returns.cov()
     
-    # Clean up column names for the output
+    # Clean up column names
     cov_matrix.columns = [col.replace('_close', '') for col in cov_matrix.columns]
     cov_matrix.index = [col.replace('_close', '') for col in cov_matrix.index]
     
@@ -129,7 +114,7 @@ def main():
         for file_path in [f for f in [latest_weekly, latest_daily] if f is not None]:
             print(f"\nProcessing {file_path.name}...")
             
-            # Use 5-year lookback for both daily and weekly
+            # Use 5-year lookback
             days_lookback = 1825  # ~5 years
             start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_lookback)).strftime('%Y-%m-%d')
             
