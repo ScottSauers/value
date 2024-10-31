@@ -22,28 +22,25 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
     try:
         debug_print(f"Reading file: {file_path}")
         
-        # Read with explicit date parser
-        parse_dates = {'date': '%Y-%m-%d'}
         if str(file_path).endswith('.tsv'):
-            df = pd.read_csv(file_path, sep='\t', parse_dates=parse_dates)
+            df = pd.read_csv(file_path, sep='\t')
         else:
-            df = pd.read_csv(file_path, parse_dates=parse_dates)
+            df = pd.read_csv(file_path)
+        
+        df['date'] = pd.to_datetime(df['date'])
         
         debug_print("Initial dataframe:", df)
         debug_print("Columns:", df.columns.tolist())
         
-        # Filter data after start date
         df = df[df['date'] >= start_date].copy()
         debug_print(f"After filtering to start_date {start_date}:", df)
         
         if df.empty:
             raise ValueError(f"No data found after {start_date}")
         
-        # Get price columns
         price_cols = [col for col in df.columns if col.endswith('_close')]
         debug_print("Price columns found:", price_cols)
         
-        # Get companies with any data
         companies_with_data = []
         for col in price_cols:
             valid_data = df[col].notna()
@@ -66,19 +63,17 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         
         companies_to_remove = set()
         total_companies = len(companies_with_data)
-        threshold = 0.1  # 10% threshold
+        threshold = 0.1
         
-        # Check each company's data pattern
         for company in companies_with_data:
             missing_ratios = []
             for date in df['date'].unique():
                 day_data = df[df['date'] == date][companies_with_data]
                 present_companies = day_data.notna().sum()
                 max_present = present_companies.max()
-                if max_present > 0:  # Only check days where some companies have data
+                if max_present > 0:
                     company_present = day_data[company].notna().sum()
                     if company_present == 0 and (present_companies / total_companies > (1 - threshold)):
-                        # Company is missing when >90% of others have data
                         companies_to_remove.add(company)
                         break
         
@@ -152,7 +147,7 @@ def main():
         for file_path in [f for f in [latest_weekly, latest_daily] if f is not None]:
             print(f"\nProcessing {file_path.name}...")
             
-            days_lookback = 1825  # 5 years
+            days_lookback = 1825
             start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_lookback)).strftime('%Y-%m-%d')
             debug_print(f"Using start date: {start_date}")
             
