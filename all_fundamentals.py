@@ -56,25 +56,14 @@ class CacheManager:
 
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
-        with self._lock:  # Use the lock for thread safety
+        with self._lock:
             with sqlite3.connect(str(self.db_path)) as conn:
-                # First check if ticker is being processed by another thread
-                cursor = conn.execute('''
-                    SELECT * FROM processed_tickers 
-                    WHERE ticker = ? AND status = 'processing'
-                    AND last_processed > datetime("now", "-10 minutes")
-                ''', (ticker,))
-                processing = cursor.fetchone()
-                if processing:
-                    return {'status': 'processing', 'ticker': ticker}
-
-                # If not processing, check for completed results
                 cursor = conn.execute('''
                     SELECT * FROM processed_tickers 
                     WHERE ticker = ? AND last_processed > datetime("now", "-7 days")
                 ''', (ticker,))
                 result = cursor.fetchone()
-
+    
                 if result:
                     return {
                         'ticker': result[0],
@@ -85,7 +74,7 @@ class CacheManager:
                         'error': result[5],
                         'data_hash': result[6]
                     }
-
+    
                 # If not found, mark as processing
                 conn.execute('''
                     INSERT OR REPLACE INTO processed_tickers 
