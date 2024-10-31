@@ -17,6 +17,7 @@ import sys
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 from rich.logging import RichHandler
+import random
 
 class CacheManager:
     """Manages caching of processed tickers using SQLite."""
@@ -193,19 +194,26 @@ def process_ticker_batch(
     cache_manager: CacheManager,
     progress_tracker: ProgressTracker
 ) -> List[dict]:
-    """Process a batch of tickers with improved caching and progress tracking."""
+    """Process a batch of tickers with improved caching, rate limiting and progress tracking."""
     results = []
     extractor = SECDataExtractor(str(output_dir))
     
     progress_tracker.new_batch(len(tickers))
     completed_in_batch = 0
     
+    # Rate limiting parameters
+    MIN_REQUEST_INTERVAL = 0.2  # Minimum 200ms between requests
+    MAX_RETRIES = 5
+    BASE_RETRY_DELAY = 2  # Base delay for exponential backoff
+    
+    # Keep track of last request time
+    last_request_time = time.time() - MIN_REQUEST_INTERVAL
+    
     for ticker in tickers:
         try:
             # Check cache first
             cached_result = cache_manager.get_cached_result(ticker)
             if cached_result:
-                # Validate cache with hash if data file exists
                 if cached_result['data_file']:
                     data_file = Path(cached_result['data_file'])
                     if data_file.exists():
@@ -216,15 +224,16 @@ def process_ticker_batch(
                             progress_tracker.update_progress(None, completed_in_batch)
                             continue
             
-            # Add delay between requests to respect rate limits
-            time.sleep(0.1)
+            # Ensure minimum interval between requests
+            time_since_last_request = time.time() - last_request_time
+            if time_since_last_request < MIN_REQUEST_INTERVAL:
+                sleep_time = MIN_REQUEST_INTERVAL - time_since_last_request
+                time.sleep(sleep_time)
             
-            # Process ticker with retries
-            max_retries = 3
-            retry_delay = 1
-            
-            for attempt in range(max_retries):
+            # Process ticker with improved retry logic
+            for attempt in range(MAX_RETRIES):
                 try:
+                    last_request_time = time.time()
                     data_file, metadata_file = extractor.process_ticker(ticker)
                     
                     result = {
@@ -235,25 +244,39 @@ def process_ticker_batch(
                         'data_hash': calculate_data_hash(data_file)
                     }
                     
-                    # Cache successful result
                     cache_manager.cache_result(ticker, result)
                     results.append(result)
-                    
                     logging.info(f"✅ Successfully processed {ticker}")
                     break
                     
                 except Exception as e:
-                    if attempt == max_retries - 1:
+                    error_str = str(e)
+                    
+                    # Check specifically for rate limit errors
+                    if "429" in error_str or "Too Many Requests" in error_str:
+                        if attempt < MAX_RETRIES - 1:
+                            # Calculate exponential backoff delay with jitter
+                            delay = BASE_RETRY_DELAY * (2 ** attempt) + random.uniform(0, 1)
+                            logging.warning(
+                                f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
+                                f"Waiting {delay:.2f}s"
+                            )
+                            time.sleep(delay)
+                            continue
+                    
+                    # If we've exhausted retries or it's not a rate limit error
+                    if attempt == MAX_RETRIES - 1:
                         error_result = {
                             'ticker': ticker,
                             'status': 'failed',
-                            'error': str(e)
+                            'error': error_str
                         }
                         cache_manager.cache_result(ticker, error_result)
                         results.append(error_result)
-                        logging.error(f"❌ Failed to process {ticker}: {str(e)}")
+                        logging.error(f"❌ Failed to process {ticker} after {MAX_RETRIES} attempts: {error_str}")
                     else:
-                        time.sleep(retry_delay * (2 ** attempt))
+                        # For non-rate-limit errors, use shorter delay
+                        time.sleep(BASE_RETRY_DELAY)
                         continue
                     
         except Exception as e:
