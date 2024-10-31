@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 from dataclasses import dataclass
+from dotenv import load_dotenv
 
 @dataclass
 class SECConcept:
@@ -115,6 +116,15 @@ class SECDataExtractor:
 
     def __init__(self, output_dir: str = "./data"):
         """Initialize the extractor with output directory."""
+        load_dotenv()
+        # Set SEC API user agent
+        sec_user_agent = os.getenv('SEC_API_USER_AGENT')
+        if not sec_user_agent:
+            raise ValueError("SEC_API_USER_AGENT environment variable not set")
+        
+        # Set the user agent for finagg
+        finagg.sec.api.USER_AGENT = sec_user_agent
+        
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
