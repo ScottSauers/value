@@ -36,9 +36,7 @@ class SECDataExtractor:
         SECConcept("PropertyPlantAndEquipmentNet"),
         SECConcept("OperatingLeaseRightOfUseAsset"),
         SECConcept("IntangibleAssetsNetExcludingGoodwill"),
-        SECConcept("Goodwill"),
         SECConcept("OtherAssets"),
-        SECConcept("InvestmentsAndAdvances"),
         
         # Balance Sheet - Liabilities
         SECConcept("Liabilities"),
@@ -53,7 +51,6 @@ class SECDataExtractor:
         SECConcept("OperatingLeaseLiabilityNoncurrent"),
         SECConcept("DeferredTaxLiabilitiesNoncurrent"),
         SECConcept("OtherLiabilitiesNoncurrent"),
-        SECConcept("PensionAndOtherPostretirementBenefitPlans"),
         
         # Stockholders' Equity
         SECConcept("StockholdersEquity"),
@@ -75,7 +72,6 @@ class SECDataExtractor:
         SECConcept("OperatingIncomeLoss"),
         SECConcept("NonoperatingIncomeExpense"),
         SECConcept("InterestExpense"),
-        SECConcept("InterestIncome"),
         SECConcept("OtherNonoperatingIncomeExpense"),
         SECConcept("IncomeTaxExpenseBenefit"),
         SECConcept("NetIncomeLoss"),
@@ -86,7 +82,6 @@ class SECDataExtractor:
         SECConcept("EarningsPerShareDiluted", units="USD/shares"),
         SECConcept("WeightedAverageNumberOfSharesOutstandingBasic", units="shares"),
         SECConcept("WeightedAverageNumberOfDilutedSharesOutstanding", units="shares"),
-        SECConcept("DividendsPerShareDeclared", units="USD/shares"),
         
         # Cash Flow
         SECConcept("NetCashProvidedByUsedInOperatingActivities"),
