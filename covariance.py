@@ -98,43 +98,62 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     return cov_matrix
 
 def main():
-    parser = argparse.ArgumentParser(description='Calculate stock price covariance matrix.')
-    parser.add_argument('file_path', help='Path to price data file (CSV/TSV)')
-    parser.add_argument('start_date', help='Start date for analysis (YYYY-MM-DD)')
-    parser.add_argument('--output', '-o', help='Output file path (default: covariance_matrix.csv)',
-                      default='covariance_matrix.csv')
+    # Define base directory
+    base_dir = Path("data/transformed")
     
-    args = parser.parse_args()
+    # Find most recent weekly and daily files
+    weekly_files = list(base_dir.glob("price_data_1wk_*.tsv"))
+    daily_files = list(base_dir.glob("price_data_1d_*.csv"))
     
-    try:
-        # Process data
-        print(f"Processing data from {args.file_path}...")
-        df, stats = load_and_process_data(args.file_path, args.start_date)
-        
-        # Print statistics
-        print("\nProcessing Statistics:")
-        print(f"Date range: {stats['date_range'][0].date()} to {stats['date_range'][1].date()}")
-        print(f"Total dates in range: {stats['total_dates']}")
-        print(f"Initial number of companies: {stats['initial_companies']}")
-        print(f"Companies removed: {len(stats['removed_companies'])} ({stats['removal_percentage']:.1f}%)")
-        print(f"Final number of companies: {stats['final_companies']}")
-        
-        if stats['removed_companies']:
-            print("\nRemoved companies:")
-            for company in sorted(stats['removed_companies']):
-                print(f"  - {company.replace('_close', '')}")
-        
-        # Calculate and save covariance matrix
-        print("\nCalculating covariance matrix...")
-        cov_matrix = calculate_covariance(df)
-        
-        # Save to CSV
-        cov_matrix.to_csv(args.output)
-        print(f"\nCovariance matrix saved to {args.output}")
-        
-    except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
+    if not weekly_files and not daily_files:
+        print("Error: No price data files found in data/transformed directory")
         sys.exit(1)
+    
+    # Get most recent files
+    latest_weekly = max(weekly_files, default=None)
+    latest_daily = max(daily_files, default=None)
+    
+    # Process both weekly and daily data if available
+    for file_path in [f for f in [latest_weekly, latest_daily] if f is not None]:
+        print(f"\nProcessing {file_path.name}...")
+        
+        # Set start date to 30 days ago for daily data, 180 days for weekly
+        days_lookback = 30 if 'price_data_1d_' in file_path.name else 180
+        start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_lookback)).strftime('%Y-%m-%d')
+        
+        try:
+            # Process data
+            df, stats = load_and_process_data(str(file_path), start_date)
+            
+            # Print statistics
+            print("\nProcessing Statistics:")
+            print(f"Start date: {start_date}")
+            print(f"Date range: {stats['date_range'][0].date()} to {stats['date_range'][1].date()}")
+            print(f"Total dates in range: {stats['total_dates']}")
+            print(f"Initial number of companies: {stats['initial_companies']}")
+            print(f"Companies removed: {len(stats['removed_companies'])} ({stats['removal_percentage']:.1f}%)")
+            print(f"Final number of companies: {stats['final_companies']}")
+            
+            if stats['removed_companies']:
+                print("\nRemoved companies:")
+                for company in sorted(stats['removed_companies']):
+                    print(f"  - {company.replace('_close', '')}")
+            
+            # Calculate covariance matrix
+            print("\nCalculating covariance matrix...")
+            cov_matrix = calculate_covariance(df)
+            
+            # Create output filename based on input file
+            output_name = f"covariance_matrix_{file_path.stem.split('_')[2]}.csv"
+            output_path = base_dir / output_name
+            
+            # Save to CSV
+            cov_matrix.to_csv(output_path)
+            print(f"Covariance matrix saved to {output_path}")
+            
+        except Exception as e:
+            print(f"Error processing {file_path.name}: {str(e)}", file=sys.stderr)
+            continue
 
 if __name__ == "__main__":
     main()
