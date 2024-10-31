@@ -27,17 +27,19 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         else:
             df = pd.read_csv(file_path)
             
-        df['date'] = pd.to_datetime(df['date'])
-        
+        # Convert date explicitly
+        df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d')
         df = df[df['date'] >= start_date].copy()
         debug_print(f"After filtering to start_date {start_date}:", df)
         
         if df.empty:
             raise ValueError(f"No data found after {start_date}")
         
+        # Get all price columns
         price_cols = [col for col in df.columns if col.endswith('_close')]
         debug_print("Price columns found:", price_cols)
         
+        # Get only companies with data
         companies_with_data = []
         for col in price_cols:
             valid_data = df[col].notna()
@@ -46,19 +48,22 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
                 debug_print(f"Company {col}: {valid_data.sum()} valid data points")
         
         debug_print(f"Companies with any data: {len(companies_with_data)}", companies_with_data)
+        debug_print("Sample of data:", df[companies_with_data].head())
         
         if not companies_with_data:
             raise ValueError("No companies with valid price data found")
             
+        # Create output dataframe and stats
+        df_clean = df[['date'] + companies_with_data].copy()
+        
         stats = {
             'initial_companies': len(companies_with_data),
             'removed_companies': [],
             'final_companies': len(companies_with_data),
+            'removal_percentage': 0.0,
             'date_range': (df['date'].min(), df['date'].max()),
             'total_dates': len(df)
         }
-        
-        df_clean = df[['date'] + companies_with_data].copy()
         
         return df_clean, stats
         
@@ -70,15 +75,22 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     debug_print("Starting covariance calculation")
     
     price_columns = [col for col in df.columns if col.endswith('_close')]
+    debug_print("Computing covariance for columns:", price_columns)
     
     if not price_columns:
         raise ValueError("No valid price columns found after cleaning")
     
+    # Calculate returns
     returns = df[price_columns].pct_change()
-    returns_clean = returns.dropna()
     debug_print(f"Returns shape before dropna: {returns.shape}")
-    debug_print(f"Returns shape after dropna: {returns_clean.shape}")
+    debug_print("Sample returns:", returns.head())
     
+    # Clean returns
+    returns_clean = returns.dropna()
+    debug_print(f"Returns shape after dropna: {returns_clean.shape}")
+    debug_print("Sample clean returns:", returns_clean.head())
+    
+    # Calculate covariance
     cov_matrix = returns_clean.cov()
     debug_print(f"Covariance matrix shape: {cov_matrix.shape}")
     
@@ -121,9 +133,7 @@ def main():
                 print(f"Start date: {start_date}")
                 print(f"Date range: {stats['date_range'][0].date()} to {stats['date_range'][1].date()}")
                 print(f"Total dates in range: {stats['total_dates']}")
-                print(f"Initial number of companies: {stats['initial_companies']}")
-                print(f"Companies removed: {len(stats['removed_companies'])} ({stats['removal_percentage']:.1f}%)")
-                print(f"Final number of companies: {stats['final_companies']}")
+                print(f"Total companies: {stats['initial_companies']}")
                 
                 print("\nCalculating covariance matrix...")
                 cov_matrix = calculate_covariance(df)
