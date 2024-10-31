@@ -29,17 +29,18 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
     try:
         debug_print(f"Reading file: {file_path}")
         
-        # Read the file
+        # Read with explicit parameters to handle potential formatting issues
         if str(file_path).endswith('.tsv'):
-            df = pd.read_csv(file_path, sep='\t')
+            df = pd.read_csv(file_path, sep='\t', skipinitialspace=True)
         else:
-            df = pd.read_csv(file_path)
+            df = pd.read_csv(
+                file_path,
+                sep=',',
+                skipinitialspace=True,
+                delim_whitespace=False,
+                dtype={'date': str}
+            )
             
-        # Ensure date column exists
-        if 'date' not in df.columns:
-            raise ValueError("No 'date' column found in the data")
-            
-        # Convert date and set as index
         df['date'] = pd.to_datetime(df['date'])
         df = df[df['date'] >= start_date].copy()
         df.set_index('date', inplace=True)
@@ -54,7 +55,7 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         
         # Get only companies with sufficient data
         companies_with_data = []
-        min_valid_points = 30  # Minimum number of valid data points required
+        min_valid_points = 30
         for col in price_cols:
             valid_data = df[col].notna()
             valid_count = valid_data.sum()
