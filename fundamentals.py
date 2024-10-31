@@ -25,13 +25,13 @@ class SECDataExtractor:
     def _init_granular_cache(self):
         """Initialize SQLite database with granular caching tables."""
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
-            # Table for storing individual concept data
+            # Table for storing individual concept data points
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS concept_cache (
                     ticker TEXT,
                     concept_tag TEXT,
                     filing_date TEXT,
-                    value REAL,
+                    concept_value REAL,  # Changed from 'value' to avoid SQL keyword
                     taxonomy TEXT,
                     units TEXT,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -180,32 +180,46 @@ class SECDataExtractor:
         """Retrieve cached data for a specific concept if available."""
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
             query = '''
-                SELECT filing_date, value 
+                SELECT filing_date, concept_value as value
                 FROM concept_cache 
                 WHERE ticker = ? AND concept_tag = ?
+                AND last_updated > datetime('now', '-7 days')
                 ORDER BY filing_date DESC
             '''
-            df = pd.read_sql_query(query, conn, params=(ticker, concept.tag))
-            
-            if not df.empty:
-                return df
+            try:
+                df = pd.read_sql_query(query, conn, params=(ticker, concept.tag))
+                if not df.empty:
+                    # Rename columns to match expected format
+                    df = df.rename(columns={'value': concept.tag})
+                    return df
+            except Exception as e:
+                self.logger.debug(f"Cache miss for {ticker} {concept.tag}: {str(e)}")
         return None
+
 
     def cache_concept_data(self, ticker: str, concept: SECConcept, data: pd.DataFrame):
         """Cache the data for a specific concept."""
         if data is None or data.empty:
             return
-
+    
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
-            # Store the concept data
-            data['ticker'] = ticker
-            data['concept_tag'] = concept.tag
-            data['taxonomy'] = concept.taxonomy
-            data['units'] = concept.units
+            # Prepare data for caching
+            cache_df = data.copy()
+            if concept.tag in cache_df.columns:
+                cache_df = cache_df.rename(columns={concept.tag: 'concept_value'})
+            else:
+                return  # Skip if the concept column isn't present
             
-            data.to_sql('concept_cache', conn, if_exists='replace', index=False)
+            cache_df['ticker'] = ticker
+            cache_df['concept_tag'] = concept.tag
+            cache_df['taxonomy'] = concept.taxonomy
+            cache_df['units'] = concept.units
             
-            # Update the status
+            # Insert data into cache
+            cache_df.to_sql('concept_cache', conn, if_exists='replace', 
+                           index=False, method='multi')
+            
+            # Update status
             conn.execute('''
                 INSERT OR REPLACE INTO concept_status 
                 (ticker, concept_tag, last_attempt, status)
@@ -278,13 +292,12 @@ class SECDataExtractor:
             try:
                 # Check cache first
                 cached_data = self.get_cached_concept(ticker, concept)
-                if cached_data is not None:
+                if cached_data is not None and not cached_data.empty:
                     self.logger.info(f"Using cached data for {ticker} {concept.tag}")
-                    if not cached_data.empty:
-                        all_data.append(cached_data)
+                    all_data.append(cached_data)
                     continue
                 
-                # If not cached, fetch from API
+                # If not cached or cache expired, fetch from API
                 df = self.rate_limited_get(
                     tag=concept.tag,
                     ticker=ticker,
@@ -293,16 +306,18 @@ class SECDataExtractor:
                 )
                 
                 if not df.empty:
+                    # Process the data
                     df = finagg.sec.api.filter_original_filings(df)
                     df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
                     df = df[['filing_date', concept.tag]]
                     
-                    # Cache the concept data
+                    # Cache the new data
                     self.cache_concept_data(ticker, concept, df)
                     
                     all_data.append(df)
                     self.logger.info(f"Successfully retrieved and cached {concept.tag} data for {ticker}")
                 else:
+                    # Cache empty result
                     self.cache_concept_data(ticker, concept, pd.DataFrame())
                     
             except Exception as e:
