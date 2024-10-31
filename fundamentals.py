@@ -121,39 +121,7 @@ class SECDataExtractor:
     _rate_limit_lock = threading.Lock()
     _request_timestamps: List[float] = []
     _MAX_CALLS = 5
-    _PERIOD = 1  # seconds
-
-    @classmethod
-    def rate_limited(cls):
-        """
-        Decorator to enforce a global rate limit of MAX_CALLS per PERIOD seconds.
-        """
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                with cls._rate_limit_lock:
-                    current_time = time.time()
-                    # Remove timestamps older than PERIOD
-                    cls._request_timestamps = [
-                        timestamp for timestamp in cls._request_timestamps
-                        if current_time - timestamp < cls._PERIOD
-                    ]
-                    if len(cls._request_timestamps) >= cls._MAX_CALLS:
-                        # Calculate time to wait
-                        earliest_timestamp = cls._request_timestamps[0]
-                        sleep_time = cls._PERIOD - (current_time - earliest_timestamp)
-                        if sleep_time > 0:
-                            time.sleep(sleep_time)
-                        # After sleeping, remove the earliest timestamp
-                        current_time = time.time()
-                        cls._request_timestamps = [
-                            timestamp for timestamp in cls._request_timestamps
-                            if current_time - timestamp < cls._PERIOD
-                        ]
-                    # Record the current timestamp
-                    cls._request_timestamps.append(time.time())
-                return func(*args, **kwargs)
-            return wrapper
-        return decorator
+    _PERIOD = 1.0  # seconds
 
     def __init__(self, output_dir: str = "./data"):
         """Initialize the extractor with output directory."""
@@ -179,7 +147,6 @@ class SECDataExtractor:
         )
         self.logger = logging.getLogger(__name__)
 
-    @rate_limited()
     def rate_limited_get(self, tag: str, ticker: str, taxonomy: str, units: str) -> pd.DataFrame:
         """
         Wrapper for the finagg.sec.api.company_concept.get method with rate limiting.
@@ -193,12 +160,41 @@ class SECDataExtractor:
         Returns:
             DataFrame containing the concept data
         """
-        return finagg.sec.api.company_concept.get(
-            tag,
-            ticker=ticker,
-            taxonomy=taxonomy,
-            units=units
-        )
+        while True:
+            with SECDataExtractor._rate_limit_lock:
+                current_time = time.time()
+                # Remove timestamps older than PERIOD
+                SECDataExtractor._request_timestamps = [
+                    timestamp for timestamp in SECDataExtractor._request_timestamps
+                    if current_time - timestamp < SECDataExtractor._PERIOD
+                ]
+                if len(SECDataExtractor._request_timestamps) < SECDataExtractor._MAX_CALLS:
+                    # Record the current timestamp and proceed
+                    SECDataExtractor._request_timestamps.append(current_time)
+                    break
+                else:
+                    # Calculate the time to wait until the earliest timestamp is older than PERIOD
+                    earliest_timestamp = SECDataExtractor._request_timestamps[0]
+                    sleep_time = SECDataExtractor._PERIOD - (current_time - earliest_timestamp)
+                    if sleep_time > 0:
+                        self.logger.debug(f"Rate limit reached. Sleeping for {sleep_time:.2f} seconds.")
+                    else:
+                        sleep_time = SECDataExtractor._PERIOD / SECDataExtractor._MAX_CALLS
+                        self.logger.debug(f"Rate limit edge case. Sleeping for {sleep_time:.2f} seconds.")
+            # Sleep outside the lock to allow other threads to proceed
+            time.sleep(sleep_time)
+
+        try:
+            response = finagg.sec.api.company_concept.get(
+                tag,
+                ticker=ticker,
+                taxonomy=taxonomy,
+                units=units
+            )
+            return response
+        except Exception as e:
+            self.logger.error(f"Error during API call for {tag} and {ticker}: {e}")
+            raise
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """
@@ -238,6 +234,7 @@ class SECDataExtractor:
                 self.logger.warning(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
                 
         if not all_data:
+            self.logger.warning(f"No SEC data found for {ticker}")
             return pd.DataFrame()
             
         # Merge all data on filing date
