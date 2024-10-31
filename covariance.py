@@ -34,6 +34,10 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         else:
             df = pd.read_csv(file_path)
             
+        # Ensure date column exists
+        if 'date' not in df.columns:
+            raise ValueError("No 'date' column found in the data")
+            
         # Convert date explicitly
         df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d')
         df = df[df['date'] >= start_date].copy()
@@ -46,7 +50,7 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         price_cols = [col for col in df.columns if col.endswith('_close')]
         debug_print("Price columns found:", price_cols)
         
-        # Get only companies with data
+        # Get only companies with sufficient data
         companies_with_data = []
         min_valid_points = 30  # Minimum number of valid data points required
         for col in price_cols:
@@ -82,7 +86,7 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
 
 def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate covariance matrix with improved handling of missing data.
+    Calculate covariance matrix using pandas built-in cov method.
     """
     debug_print("Starting covariance calculation")
     
@@ -95,36 +99,11 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     
     # Calculate returns with explicit fill_method=None
     returns = df[price_columns].pct_change(fill_method=None)
-    debug_print(f"Returns shape before processing: {returns.shape}")
+    debug_print(f"Returns shape: {returns.shape}")
     debug_print("Sample returns:", returns.head())
     
-    # Instead of dropping all NA rows, we'll calculate pairwise covariances
-    cov_matrix = pd.DataFrame(index=price_columns, columns=price_columns)
-    min_periods = 30  # Minimum number of overlapping periods required
-    
-    total_pairs = len(price_columns) * (len(price_columns) - 1) // 2
-    processed_pairs = 0
-    
-    for i, col1 in enumerate(price_columns):
-        for j, col2 in enumerate(price_columns[i:], i):
-            # Get paired data without NaNs
-            paired_data = pd.DataFrame({
-                'col1': returns[col1],
-                'col2': returns[col2]
-            }).dropna()
-            
-            if len(paired_data) >= min_periods:
-                cov = paired_data['col1'].cov(paired_data['col2'])
-                cov_matrix.loc[col1, col2] = cov
-                cov_matrix.loc[col2, col1] = cov  # Matrix is symmetric
-            else:
-                cov_matrix.loc[col1, col2] = np.nan
-                cov_matrix.loc[col2, col1] = np.nan
-            
-            processed_pairs += 1
-            if processed_pairs % 1000 == 0:
-                print(f"Processed {processed_pairs}/{total_pairs} pairs...")
-    
+    # Calculate covariance matrix with minimum periods requirement
+    cov_matrix = returns.cov(min_periods=30)
     debug_print(f"Covariance matrix shape: {cov_matrix.shape}")
     debug_print("Sample of covariance matrix:", cov_matrix.iloc[:5, :5])
     
