@@ -214,22 +214,23 @@ class SECDataExtractor:
             cache_df['concept_tag'] = concept.tag
             cache_df['taxonomy'] = concept.taxonomy
             cache_df['units'] = concept.units
-            
+            cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
             # Delete existing data for this ticker and concept
             conn.execute('''
-                DELETE FROM concept_cache 
+                DELETE FROM concept_cache
                 WHERE ticker = ? AND concept_tag = ?
             ''', (ticker, concept.tag))
-            
+    
             # Insert new data
-            cache_df.to_sql('concept_cache', conn, if_exists='append', 
+            cache_df.to_sql('concept_cache', conn, if_exists='append',
                            index=False, method='multi')
-            
+    
             # Update status
             conn.execute('''
-                INSERT OR REPLACE INTO concept_status 
+                INSERT OR REPLACE INTO concept_status
                 (ticker, concept_tag, last_attempt, status)
-                VALUES (?, ?, CURRENT_TIMESTAMP, 'success')
+                VALUES (?, ?, datetime('now'), 'success')
             ''', (ticker, concept.tag))
 
     def cache_concept_error(self, ticker: str, concept: SECConcept, error: str):
