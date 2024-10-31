@@ -346,9 +346,33 @@ class SECDataExtractor:
         return merged_df
 
     def save_data(self, df: pd.DataFrame, ticker: str, metadata: Dict) -> Tuple[str, str]:
-        """Save the SEC data and metadata to files."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        """Save the SEC data and metadata to files with deduplication."""
+        # First check if identical data already exists
+        existing_files = list(self.output_dir.glob(f"{ticker}_sec_data_*.tsv"))
         
+        # Generate hash of current dataframe content
+        current_content = df.to_csv(sep='\t', index=False).encode()
+        current_hash = hashlib.md5(current_content).hexdigest()
+        
+        # Check for duplicates
+        for existing_file in existing_files:
+            with open(existing_file, 'rb') as f:
+                existing_hash = hashlib.md5(f.read()).hexdigest()
+                if existing_hash == current_hash:
+                    # Found identical file, use its timestamp for metadata
+                    timestamp = existing_file.stem.split('_')[-1]
+                    metadata_file = self.output_dir / f"{ticker}_sec_data_{timestamp}.json"
+                    
+                    # Update metadata timestamp if needed
+                    if metadata_file.exists():
+                        return str(existing_file), str(metadata_file)
+                    else:
+                        # Just create new metadata if missing
+                        pd.Series(metadata).to_json(metadata_file)
+                        return str(existing_file), str(metadata_file)
+        
+        # If no duplicate found, create new files
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         data_filename = f"{ticker}_sec_data_{timestamp}.tsv"
         data_filepath = self.output_dir / data_filename
         df.to_csv(data_filepath, sep='\t', index=False)
@@ -362,7 +386,7 @@ class SECDataExtractor:
         return str(data_filepath), str(metadata_filepath)
 
     def process_ticker(self, ticker: str) -> Tuple[str, str]:
-        """Process a single ticker to extract and save SEC data."""
+        """Process a single ticker to extract and save SEC data with deduplication."""
         metadata = {
             'ticker': ticker,
             'extraction_date': datetime.now().isoformat(),
@@ -374,6 +398,10 @@ class SECDataExtractor:
             df = self.get_sec_data(ticker)
             if df.empty:
                 raise ValueError(f"No SEC data found for {ticker}")
+            
+            # Sort DataFrame consistently to ensure same content produces same hash
+            df = df.sort_values(['filing_date'] + list(df.columns.drop('filing_date')))
+            df = df.reset_index(drop=True)
             
             return self.save_data(df, ticker, metadata)
             
