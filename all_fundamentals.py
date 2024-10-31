@@ -20,12 +20,11 @@ from rich.logging import RichHandler
 import random
 
 class CacheManager:
-    """Manages caching of processed tickers using SQLite."""
-    
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / 'ticker_cache.db'
+        self._lock = threading.Lock()
         self._init_db()
         self._check_schema()
 
@@ -56,24 +55,44 @@ class CacheManager:
 
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.execute(
-                'SELECT * FROM processed_tickers WHERE ticker = ? AND last_processed > datetime("now", "-7 days")',
-                (ticker,)
-            )
-            result = cursor.fetchone()
-            
-        if result:
-            return {
-                'ticker': result[0],
-                'last_processed': result[1],
-                'status': result[2],
-                'data_file': result[3],
-                'metadata_file': result[4],
-                'error': result[5],
-                'data_hash': result[6]
-            }
-        return None
+        with self._lock:  # Use the lock for thread safety
+            with sqlite3.connect(str(self.db_path)) as conn:
+                # First check if ticker is being processed by another thread
+                cursor = conn.execute('''
+                    SELECT * FROM processed_tickers 
+                    WHERE ticker = ? AND status = 'processing'
+                    AND last_processed > datetime("now", "-10 minutes")
+                ''', (ticker,))
+                processing = cursor.fetchone()
+                if processing:
+                    return {'status': 'processing', 'ticker': ticker}
+
+                # If not processing, check for completed results
+                cursor = conn.execute('''
+                    SELECT * FROM processed_tickers 
+                    WHERE ticker = ? AND last_processed > datetime("now", "-7 days")
+                ''', (ticker,))
+                result = cursor.fetchone()
+
+                if result:
+                    return {
+                        'ticker': result[0],
+                        'last_processed': result[1],
+                        'status': result[2],
+                        'data_file': result[3],
+                        'metadata_file': result[4],
+                        'error': result[5],
+                        'data_hash': result[6]
+                    }
+
+                # If not found, mark as processing
+                conn.execute('''
+                    INSERT OR REPLACE INTO processed_tickers 
+                    (ticker, last_processed, status)
+                    VALUES (?, datetime('now'), 'processing')
+                ''', (ticker,))
+                conn.commit()
+                return None
 
     def get_processed_tickers_count(self) -> int:
         """Get count of successfully processed tickers within the last 7 days."""
@@ -282,38 +301,33 @@ def process_ticker_batch(
     cache_manager: CacheManager,
     progress_tracker: ProgressTracker
 ) -> List[dict]:
-    """Process a batch of tickers with improved caching and progress tracking."""
     results = []
     extractor = SECDataExtractor(str(output_dir))
-    
-    # Get already processed count for this batch
-    already_processed = cache_manager.get_processed_tickers_in_batch(tickers)
-    
-    progress_tracker.new_batch(len(tickers))
-    # Initialize batch progress with already processed items
-    progress_tracker.update_progress(None, already_processed)
-    completed_in_batch = already_processed
-        
-    # Rate limiting parameters
-    MIN_REQUEST_INTERVAL = 0.2
-    MAX_RETRIES = 5
-    BASE_RETRY_DELAY = 2
-    last_request_time = time.time() - MIN_REQUEST_INTERVAL
-    
+    completed_in_batch = 0
+
     for ticker in tickers:
         try:
-            # Check cache first
-            cached_result = cache_manager.get_cached_result(ticker)
-            if cached_result and cached_result['data_file']:
-                data_file = Path(cached_result['data_file'])
-                if data_file.exists():
-                    current_hash = calculate_data_hash(data_file)
-                    if current_hash == cached_result['data_hash']:
-                        results.append(cached_result)
-                        completed_in_batch += 1
-                        progress_tracker.update_progress(None, completed_in_batch)
-                        logging.info(f"✅ Using cached data for {ticker}")
-                        continue  # Skip to next ticker
+            # Check cache first with thread safety
+            while True:
+                cached_result = cache_manager.get_cached_result(ticker)
+                if cached_result is None:
+                    # We got permission to process this ticker
+                    break
+                elif cached_result['status'] == 'processing':
+                    # Another thread is processing, wait a bit
+                    time.sleep(1)
+                    continue
+                elif cached_result['data_file']:
+                    # We have valid cached data
+                    data_file = Path(cached_result['data_file'])
+                    if data_file.exists():
+                        current_hash = calculate_data_hash(data_file)
+                        if current_hash == cached_result['data_hash']:
+                            results.append(cached_result)
+                            completed_in_batch += 1
+                            progress_tracker.update_progress(None, completed_in_batch)
+                            logging.info(f"✅ Using cached data for {ticker}")
+                            break
             
             # If we reach here, either no cache or cache invalid
             time_since_last_request = time.time() - last_request_time
@@ -341,7 +355,6 @@ def process_ticker_batch(
                     
                 except Exception as e:
                     error_str = str(e)
-                    # ... rest of error handling ...
                     
         except Exception as e:
             error_result = {
