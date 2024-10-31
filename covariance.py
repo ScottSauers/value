@@ -1,7 +1,12 @@
+#!/usr/bin/env python3
+"""
+covariance.py - Calculate covariance matrix for stock price data with strict data quality requirements.
+Handles both CSV and TSV files, filtering by date and removing companies with inconsistent missing data.
+"""
+
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import argparse
 import sys
 from datetime import datetime
 
@@ -45,25 +50,28 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         'total_dates': len(df)
     }
     
-    # Find companies with any missing data in rows where others have data
+    # Create a mask of rows where at least one company has data
+    valid_data_mask = df[companies].notna().any(axis=1)
+    
+    # Find companies with missing data where they should have it
     companies_to_remove = set()
     
     for company in companies:
-        # Check if company has missing data in rows where other companies have data
-        company_data = df[company]
-        has_missing = company_data.isna()
+        # Get rows where this company has missing data
+        company_missing = df[company].isna()
         
-        if has_missing.any():
-            # Check if these missing values are in rows where other companies have data
-            other_companies_data = df[[c for c in companies if c != company]]
-            rows_with_other_data = other_companies_data.notna().any(axis=1)
-            
-            if (has_missing & rows_with_other_data).any():
-                companies_to_remove.add(company)
+        # Check if any of these missing values occur on dates where other companies have data
+        other_companies = [c for c in companies if c != company]
+        other_companies_data = df[other_companies].notna().any(axis=1)
+        
+        # If company has missing data when others have data, mark it for removal
+        invalid_missing = (company_missing & other_companies_data).any()
+        if invalid_missing:
+            companies_to_remove.add(company)
     
-    # Remove companies with missing data
+    # Keep only companies with consistent data
     clean_companies = [c for c in companies if c not in companies_to_remove]
-    df_clean = df[['date'] + clean_companies]
+    df_clean = df[['date'] + clean_companies].copy()
     
     # Update statistics
     stats['removed_companies'] = list(companies_to_remove)
@@ -85,7 +93,10 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     # Get price columns (ending with _close)
     price_columns = [col for col in df.columns if col.endswith('_close')]
     
-    # Calculate returns
+    if not price_columns:
+        raise ValueError("No valid price columns found after cleaning")
+    
+    # Calculate returns (handle NA values appropriately)
     returns = df[price_columns].pct_change()
     
     # Calculate covariance matrix
@@ -117,6 +128,7 @@ def main():
     for file_path in [f for f in [latest_weekly, latest_daily] if f is not None]:
         print(f"\nProcessing {file_path.name}...")
         
+        # Set lookback period: ~5 years for daily, ~1 year for weekly
         days_lookback = 1825 if 'price_data_1d_' in file_path.name else 260
         start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_lookback)).strftime('%Y-%m-%d')
         
@@ -137,6 +149,10 @@ def main():
                 print("\nRemoved companies:")
                 for company in sorted(stats['removed_companies']):
                     print(f"  - {company.replace('_close', '')}")
+            
+            if stats['final_companies'] == 0:
+                print("\nWarning: No companies remaining after filtering!")
+                continue
             
             # Calculate covariance matrix
             print("\nCalculating covariance matrix...")
