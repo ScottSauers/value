@@ -245,15 +245,7 @@ class SECDataExtractor:
     def rate_limited_get(self, tag: str, ticker: str, taxonomy: str, units: str) -> pd.DataFrame:
         """
         Wrapper for the finagg.sec.api.company_concept.get method with rate limiting.
-        
-        Args:
-            tag: SEC concept tag
-            ticker: Stock ticker symbol
-            taxonomy: Taxonomy to use
-            units: Units of the concept
-            
-        Returns:
-            DataFrame containing the concept data
+        Only implements backoff for rate limits, immediately returns empty DataFrame for 404s.
         """
         while True:
             with SECDataExtractor._rate_limit_lock:
@@ -267,18 +259,7 @@ class SECDataExtractor:
                     # Record the current timestamp and proceed
                     SECDataExtractor._request_timestamps.append(current_time)
                     break
-                else:
-                    # Calculate the time to wait until the earliest timestamp is older than PERIOD
-                    earliest_timestamp = SECDataExtractor._request_timestamps[0]
-                    sleep_time = SECDataExtractor._PERIOD - (current_time - earliest_timestamp)
-                    if sleep_time > 0:
-                        self.logger.debug(f"Rate limit reached. Sleeping for {sleep_time:.2f} seconds.")
-                    else:
-                        sleep_time = SECDataExtractor._PERIOD / SECDataExtractor._MAX_CALLS
-                        self.logger.debug(f"Rate limit edge case. Sleeping for {sleep_time:.2f} seconds.")
-            # Sleep outside the lock to allow other threads to proceed
-            time.sleep(sleep_time)
-
+    
         try:
             response = finagg.sec.api.company_concept.get(
                 tag,
@@ -288,8 +269,15 @@ class SECDataExtractor:
             )
             return response
         except Exception as e:
-            self.logger.error(f"Error during API call for {tag} and {ticker}: {e}")
-            raise
+            error_str = str(e)
+            if "404" in error_str:
+                self.logger.error(f"404 error for {tag} and {ticker}: {e}")
+                return pd.DataFrame()  # Return empty DataFrame for 404s
+            elif "429" in error_str or "Too Many Requests" in error_str:
+                raise  # Let process_ticker_batch handle rate limit retry
+            else:
+                self.logger.error(f"Error during API call for {tag} and {ticker}: {e}")
+                raise
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """Retrieve SEC fundamental data with granular caching."""
