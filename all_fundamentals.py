@@ -76,6 +76,7 @@ class CacheManager:
 
     def get_processed_tickers_count(self) -> int:
         """Get count of successfully processed tickers within the last 7 days."""
+        # Get count from processed_tickers in ticker_cache.db
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute('''
                 SELECT COUNT(DISTINCT ticker) FROM processed_tickers 
@@ -84,14 +85,19 @@ class CacheManager:
             ''')
             ticker_count = cursor.fetchone()[0]
     
-            # Also check concept_cache for completed tickers
-            cursor = conn.execute('''
-                SELECT COUNT(DISTINCT ticker) FROM concept_cache
-                WHERE last_updated > datetime("now", "-7 days")
-            ''')
-            concept_count = cursor.fetchone()[0]
+        # Get count from concept_cache in granular_cache.db
+        granular_db_path = self.cache_dir / 'granular_cache.db'
+        if granular_db_path.exists():
+            with sqlite3.connect(str(granular_db_path)) as conn:
+                cursor = conn.execute('''
+                    SELECT COUNT(DISTINCT ticker) FROM concept_cache
+                    WHERE last_updated > datetime("now", "-7 days")
+                ''')
+                concept_count = cursor.fetchone()[0]
+        else:
+            concept_count = 0
     
-            return max(ticker_count, concept_count)
+        return max(ticker_count, concept_count)
 
     def get_processed_tickers_in_batch(self, batch_tickers: List[str]) -> int:
         """Get count of successfully processed tickers from a specific batch."""
