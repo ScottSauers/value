@@ -13,7 +13,7 @@ def debug_print(msg, data=None, max_lines=10):
         elif isinstance(data, (list, set)):
             data_list = list(data)
             print(f"Length: {len(data_list)}")
-            if len(data_list) > 20:  # If more than 20 items, show first and last 10
+            if len(data_list) > 20:
                 print("First 10 items:")
                 print(data_list[:10])
                 print("Last 10 items:")
@@ -29,6 +29,7 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
     try:
         debug_print(f"Reading file: {file_path}")
         
+        # Read the file
         if str(file_path).endswith('.tsv'):
             df = pd.read_csv(file_path, sep='\t')
         else:
@@ -38,9 +39,10 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         if 'date' not in df.columns:
             raise ValueError("No 'date' column found in the data")
             
-        # Convert date explicitly
-        df['date'] = pd.to_datetime(df['date'], format='%Y-%m-%d')
+        # Convert date and set as index
+        df['date'] = pd.to_datetime(df['date'])
         df = df[df['date'] >= start_date].copy()
+        df.set_index('date', inplace=True)
         debug_print(f"After filtering to start_date {start_date}:", df)
         
         if df.empty:
@@ -60,21 +62,21 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
                 companies_with_data.append(col)
                 debug_print(f"Company {col}: {valid_count} valid data points")
         
-        debug_print(f"Companies with any data: {len(companies_with_data)}", companies_with_data)
-        debug_print("Sample of data:", df[companies_with_data].head())
+        debug_print(f"Companies with sufficient data: {len(companies_with_data)}", companies_with_data)
         
         if not companies_with_data:
-            raise ValueError("No companies with valid price data found")
+            raise ValueError("No companies with sufficient valid price data found")
             
-        # Create output dataframe and stats
-        df_clean = df[['date'] + companies_with_data].copy()
+        # Keep only price columns with sufficient data
+        df_clean = df[companies_with_data].copy()
+        debug_print("Sample of cleaned data:", df_clean.head())
         
         stats = {
-            'initial_companies': len(companies_with_data),
-            'removed_companies': [],
+            'initial_companies': len(price_cols),
             'final_companies': len(companies_with_data),
-            'removal_percentage': 0.0,
-            'date_range': (df['date'].min(), df['date'].max()),
+            'removed_companies': len(price_cols) - len(companies_with_data),
+            'removal_percentage': (len(price_cols) - len(companies_with_data)) / len(price_cols) * 100,
+            'date_range': (df.index.min(), df.index.max()),
             'total_dates': len(df)
         }
         
@@ -90,19 +92,16 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     """
     debug_print("Starting covariance calculation")
     
-    # Get price columns
-    price_columns = [col for col in df.columns if col.endswith('_close')]
-    debug_print("Computing covariance for columns:", price_columns)
+    if df.empty:
+        raise ValueError("Empty DataFrame provided")
     
-    if not price_columns:
-        raise ValueError("No valid price columns found after cleaning")
-    
-    # Calculate returns with explicit fill_method=None
-    returns = df[price_columns].pct_change(fill_method=None)
+    # Calculate returns (percentage change)
+    debug_print("Original data sample:", df.head())
+    returns = df.pct_change()
     debug_print(f"Returns shape: {returns.shape}")
-    debug_print("Sample returns:", returns.head())
+    debug_print("Returns sample:", returns.head())
     
-    # Calculate covariance matrix with minimum periods requirement
+    # Calculate covariance matrix
     cov_matrix = returns.cov(min_periods=30)
     debug_print(f"Covariance matrix shape: {cov_matrix.shape}")
     debug_print("Sample of covariance matrix:", cov_matrix.iloc[:5, :5])
@@ -152,7 +151,9 @@ def main():
                 print(f"Start date: {start_date}")
                 print(f"Date range: {stats['date_range'][0].date()} to {stats['date_range'][1].date()}")
                 print(f"Total dates in range: {stats['total_dates']}")
-                print(f"Total companies: {stats['initial_companies']}")
+                print(f"Initial companies: {stats['initial_companies']}")
+                print(f"Final companies: {stats['final_companies']}")
+                print(f"Removed companies: {stats['removed_companies']} ({stats['removal_percentage']:.1f}%)")
                 
                 print("\nCalculating covariance matrix...")
                 cov_matrix = calculate_covariance(df)
