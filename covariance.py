@@ -53,34 +53,12 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         stats = {
             'initial_companies': len(companies_with_data),
             'removed_companies': [],
-            'final_companies': 0,
+            'final_companies': len(companies_with_data),
             'date_range': (df['date'].min(), df['date'].max()),
             'total_dates': len(df)
         }
         
-        df_companies = df[companies_with_data]
-        threshold = 0.1
-        companies_to_remove = set()
-        
-        for company in companies_with_data:
-            missing = df_companies[company].isna()
-            if missing.any():
-                others = df_companies.drop(columns=[company]).notna().any(axis=1)
-                if (missing & others).sum() / len(others) > threshold:
-                    companies_to_remove.add(company)
-                    debug_print(f"Removing {company}: too many missing values when others present")
-        
-        clean_companies = [c for c in companies_with_data if c not in companies_to_remove]
-        debug_print(f"Companies remaining: {len(clean_companies)}")
-        
-        if clean_companies:
-            df_clean = df[['date'] + clean_companies].copy()
-        else:
-            df_clean = df[['date']].copy()
-        
-        stats['removed_companies'] = list(companies_to_remove)
-        stats['final_companies'] = len(clean_companies)
-        stats['removal_percentage'] = (len(companies_to_remove) / stats['initial_companies'] * 100)
+        df_clean = df[['date'] + companies_with_data].copy()
         
         return df_clean, stats
         
@@ -98,8 +76,11 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     
     returns = df[price_columns].pct_change()
     returns_clean = returns.dropna()
+    debug_print(f"Returns shape before dropna: {returns.shape}")
+    debug_print(f"Returns shape after dropna: {returns_clean.shape}")
     
     cov_matrix = returns_clean.cov()
+    debug_print(f"Covariance matrix shape: {cov_matrix.shape}")
     
     cov_matrix.columns = [col.replace('_close', '') for col in cov_matrix.columns]
     cov_matrix.index = [col.replace('_close', '') for col in cov_matrix.index]
@@ -143,15 +124,6 @@ def main():
                 print(f"Initial number of companies: {stats['initial_companies']}")
                 print(f"Companies removed: {len(stats['removed_companies'])} ({stats['removal_percentage']:.1f}%)")
                 print(f"Final number of companies: {stats['final_companies']}")
-                
-                if stats['removed_companies']:
-                    print("\nRemoved companies:")
-                    for company in sorted(stats['removed_companies']):
-                        print(f"  - {company.replace('_close', '')}")
-                
-                if stats['final_companies'] == 0:
-                    print("\nWarning: No companies remaining after filtering!")
-                    continue
                 
                 print("\nCalculating covariance matrix...")
                 cov_matrix = calculate_covariance(df)
