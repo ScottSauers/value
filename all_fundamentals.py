@@ -489,9 +489,9 @@ def main():
     # Configuration
     INPUT_FILE = 'small_cap_stocks_latest.csv'
     OUTPUT_DIR = './data/fundamentals'
-    MAX_WORKERS = 4
+    MAX_WORKERS = 8
     TICKER_COLUMN = 'ticker'
-    BATCH_SIZE = 50
+    BATCH_SIZE = 25
     
     try:
         console = Console()
