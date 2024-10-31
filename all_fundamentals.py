@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 from rich.logging import RichHandler
 import random
+import threading
 
 class CacheManager:
     def __init__(self, cache_dir: Path):
