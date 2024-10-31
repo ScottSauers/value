@@ -8,7 +8,7 @@ def debug_print(msg, data=None, max_lines=10):
     if data is not None:
         if isinstance(data, pd.DataFrame):
             print(f"Shape: {data.shape}")
-            print("First {max_lines} rows:")
+            print(f"First {max_lines} rows:")
             print(data.head(max_lines))
         elif isinstance(data, (list, set)):
             data_list = list(data)
@@ -19,7 +19,7 @@ def debug_print(msg, data=None, max_lines=10):
                 print("Last 10 items:")
                 print(data_list[-10:])
             else:
-                print(f"All items:")
+                print("All items:")
                 print(data_list)
         else:
             print(data)
@@ -30,13 +30,11 @@ def determine_separator(file_path: str) -> str:
     with open(file_path, 'r') as f:
         first_lines = [next(f) for _ in range(5)]
         
-    # Count fields with different delimiters
     delimiters = {
         '\t': [len(line.split('\t')) for line in first_lines],
         ',': [len(line.split(',')) for line in first_lines]
     }
     
-    # Choose delimiter that gives most consistent field counts
     consistent_counts = {
         d: len(set(counts)) == 1 and counts[0] > 1
         for d, counts in delimiters.items()
@@ -48,6 +46,58 @@ def determine_separator(file_path: str) -> str:
         return ','
     else:
         raise ValueError(f"Could not determine consistent delimiter for {file_path}")
+
+def filter_companies_by_data_quality(df: pd.DataFrame, threshold: float = 0.99) -> tuple[pd.DataFrame, dict]:
+    """
+    Filter companies based on data availability when other companies have data.
+    
+    Args:
+        df: DataFrame with companies as columns and dates as index
+        threshold: Minimum proportion of companies required to have data for a row to be considered
+    
+    Returns:
+        Tuple of (filtered DataFrame, statistics dictionary)
+    """
+    debug_print("Starting company filtering based on data quality")
+    initial_companies = df.columns.tolist()
+    initial_count = len(initial_companies)
+    
+    # Calculate the minimum number of companies needed to consider a row valid
+    min_companies_threshold = int(len(df.columns) * threshold)
+    
+    # For each row, count how many companies have data
+    companies_with_data_per_row = df.notna().sum(axis=1)
+    
+    # Identify rows where enough companies have data
+    valid_rows = companies_with_data_per_row >= min_companies_threshold
+    debug_print(f"Found {valid_rows.sum()} rows with >= {threshold*100}% companies having data")
+    
+    # For these rows, any company with missing data should be removed
+    companies_to_remove = set()
+    
+    for company in df.columns:
+        # Check if company has any missing data in rows where most others have data
+        missing_in_valid_rows = df[company][valid_rows].isna().any()
+        if missing_in_valid_rows:
+            companies_to_remove.add(company)
+    
+    debug_print(f"Companies to be removed: {len(companies_to_remove)}", companies_to_remove)
+    
+    # Remove the identified companies
+    remaining_companies = [col for col in df.columns if col not in companies_to_remove]
+    df_filtered = df[remaining_companies].copy()
+    
+    # Calculate statistics
+    stats = {
+        'initial_company_count': initial_count,
+        'removed_companies': list(companies_to_remove),
+        'removed_count': len(companies_to_remove),
+        'removal_percentage': (len(companies_to_remove) / initial_count) * 100,
+        'remaining_count': len(remaining_companies)
+    }
+    
+    debug_print("After filtering:", df_filtered)
+    return df_filtered, stats
 
 def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame, dict]:
     try:
@@ -77,35 +127,25 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         price_cols = [col for col in df.columns if col.endswith('_close')]
         debug_print("Price columns found:", price_cols)
         
-        # Get only companies with sufficient data
-        companies_with_data = []
-        min_valid_points = 30
-        for col in price_cols:
-            valid_data = df[col].notna()
-            valid_count = valid_data.sum()
-            if valid_count >= min_valid_points:
-                companies_with_data.append(col)
-                debug_print(f"Company {col}: {valid_count} valid data points")
+        if not price_cols:
+            raise ValueError("No price columns found in data")
         
-        debug_print(f"Companies with sufficient data: {len(companies_with_data)}", companies_with_data)
+        # Keep only price columns
+        df_prices = df[price_cols].copy()
         
-        if not companies_with_data:
-            raise ValueError("No companies with sufficient valid price data found")
-            
-        # Keep only price columns with sufficient data
-        df_clean = df[companies_with_data].copy()
-        debug_print("Sample of cleaned data:", df_clean.head())
+        # Apply the new filtering based on data quality
+        df_filtered, quality_stats = filter_companies_by_data_quality(df_prices, threshold=0.99)
+        
+        if df_filtered.empty:
+            raise ValueError("No companies remaining after filtering")
         
         stats = {
-            'initial_companies': len(price_cols),
-            'final_companies': len(companies_with_data),
-            'removed_companies': len(price_cols) - len(companies_with_data),
-            'removal_percentage': (len(price_cols) - len(companies_with_data)) / len(price_cols) * 100,
-            'date_range': (df.index.min(), df.index.max()),
-            'total_dates': len(df)
+            'date_range': (df_filtered.index.min(), df_filtered.index.max()),
+            'total_dates': len(df_filtered),
+            **quality_stats
         }
         
-        return df_clean, stats
+        return df_filtered, stats
         
     except Exception as e:
         print(f"Error in load_and_process_data: {str(e)}")
@@ -127,7 +167,7 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     debug_print("Returns sample:", returns.head())
     
     # Calculate covariance matrix
-    cov_matrix = returns.cov(min_periods=30)
+    cov_matrix = returns.cov()
     debug_print(f"Covariance matrix shape: {cov_matrix.shape}")
     debug_print("Sample of covariance matrix:", cov_matrix.iloc[:5, :5])
     
@@ -165,8 +205,13 @@ def main():
         for file_path in [f for f in [latest_weekly, latest_daily] if f is not None]:
             print(f"\nProcessing {file_path.name}...")
             
-            days_lookback = 1825
-            start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_lookback)).strftime('%Y-%m-%d')
+            # Use command line argument for start_date if provided, otherwise use 5 years
+            if len(sys.argv) > 1:
+                start_date = sys.argv[1]
+            else:
+                days_lookback = 1825  # 5 years
+                start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_lookback)).strftime('%Y-%m-%d')
+            
             debug_print(f"Using start date: {start_date}")
             
             try:
@@ -176,9 +221,14 @@ def main():
                 print(f"Start date: {start_date}")
                 print(f"Date range: {stats['date_range'][0].date()} to {stats['date_range'][1].date()}")
                 print(f"Total dates in range: {stats['total_dates']}")
-                print(f"Initial companies: {stats['initial_companies']}")
-                print(f"Final companies: {stats['final_companies']}")
-                print(f"Removed companies: {stats['removed_companies']} ({stats['removal_percentage']:.1f}%)")
+                print(f"Initial companies: {stats['initial_company_count']}")
+                print(f"Removed companies: {stats['removed_count']} ({stats['removal_percentage']:.1f}%)")
+                print(f"Remaining companies: {stats['remaining_count']}")
+                
+                if stats['removed_count'] > 0:
+                    print("\nRemoved companies:")
+                    for company in stats['removed_companies']:
+                        print(f"- {company.replace('_close', '')}")
                 
                 print("\nCalculating covariance matrix...")
                 cov_matrix = calculate_covariance(df)
