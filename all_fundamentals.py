@@ -74,6 +74,28 @@ class CacheManager:
             }
         return None
 
+    def get_processed_tickers_count(self) -> int:
+        """Get count of successfully processed tickers within the last 7 days."""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute('''
+                SELECT COUNT(*) FROM processed_tickers 
+                WHERE status = 'success' 
+                AND last_processed > datetime("now", "-7 days")
+            ''')
+            return cursor.fetchone()[0]
+
+    def get_processed_tickers_in_batch(self, batch_tickers: List[str]) -> int:
+        """Get count of successfully processed tickers from a specific batch."""
+        placeholders = ','.join(['?' for _ in batch_tickers])
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute(f'''
+                SELECT COUNT(*) FROM processed_tickers 
+                WHERE ticker IN ({placeholders})
+                AND status = 'success' 
+                AND last_processed > datetime("now", "-7 days")
+            ''', batch_tickers)
+            return cursor.fetchone()[0]
+
     def cache_result(self, ticker: str, result: Dict):
         """Cache the processing result for a ticker."""
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -194,13 +216,18 @@ def process_ticker_batch(
     cache_manager: CacheManager,
     progress_tracker: ProgressTracker
 ) -> List[dict]:
-    """Process a batch of tickers with improved caching, rate limiting and progress tracking."""
+    """Process a batch of tickers with improved caching and progress tracking."""
     results = []
     extractor = SECDataExtractor(str(output_dir))
     
-    progress_tracker.new_batch(len(tickers))
-    completed_in_batch = 0
+    # Get already processed count for this batch
+    already_processed = cache_manager.get_processed_tickers_in_batch(tickers)
     
+    progress_tracker.new_batch(len(tickers))
+    # Initialize batch progress with already processed items
+    progress_tracker.update_progress(None, already_processed)
+    completed_in_batch = already_processed
+        
     # Rate limiting parameters
     MIN_REQUEST_INTERVAL = 0.2  # Minimum 200ms between requests
     MAX_RETRIES = 5
@@ -331,9 +358,19 @@ def parallel_process_tickers(
         for i in range(0, len(tickers), batch_size)
     ]
     
-    # Initialize progress tracking
-    progress_tracker.init_progress(len(tickers))
+    # Get count of already processed tickers
+    already_processed_count = cache_manager.get_processed_tickers_count()
+    logger.info(f"📋 Found {len(tickers)} unique tickers to process "
+                f"({already_processed_count} already processed)")
     
+    # Initialize progress tracking with already processed count
+    progress_tracker.init_progress(len(tickers))
+    if already_processed_count > 0:
+        progress_tracker.update_progress(already_processed_count)
+        completed_total = already_processed_count
+    else:
+        completed_total = 0
+
     # Process batches in parallel
     start_time = datetime.now()
     results = []
