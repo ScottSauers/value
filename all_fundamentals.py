@@ -359,9 +359,9 @@ def parallel_process_tickers(
     ]
     
     # Get count of already processed tickers
-    already_processed_count = cache_manager.get_processed_tickers_count()
     logger.info(f"📋 Found {len(tickers)} unique tickers to process "
-                f"({already_processed_count} already processed)")
+                f"({already_processed_count} already processed, "
+                f"{len(tickers) - already_processed_count} remaining)")
     
     # Initialize progress tracking with already processed count
     progress_tracker.init_progress(len(tickers))
@@ -401,7 +401,7 @@ def parallel_process_tickers(
                 completion_percentage = (completed_total / len(tickers)) * 100
                 logger.info(
                     f"📊 Completed batch {i+1}/{len(ticker_batches)} "
-                    f"({completion_percentage:.1f}% overall)"
+                    f"({completed_total} of {len(tickers)} tickers processed, {completion_percentage:.1f}% overall)"
                 )
                 
             except Exception as e:
