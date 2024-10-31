@@ -25,22 +25,46 @@ def debug_print(msg, data=None, max_lines=10):
             print(data)
     sys.stdout.flush()
 
+def determine_separator(file_path: str) -> str:
+    """Determine the correct separator by comparing field counts."""
+    with open(file_path, 'r') as f:
+        first_lines = [next(f) for _ in range(5)]
+        
+    # Count fields with different delimiters
+    delimiters = {
+        '\t': [len(line.split('\t')) for line in first_lines],
+        ',': [len(line.split(',')) for line in first_lines]
+    }
+    
+    # Choose delimiter that gives most consistent field counts
+    consistent_counts = {
+        d: len(set(counts)) == 1 and counts[0] > 1
+        for d, counts in delimiters.items()
+    }
+    
+    if consistent_counts.get('\t'):
+        return '\t'
+    elif consistent_counts.get(','):
+        return ','
+    else:
+        raise ValueError(f"Could not determine consistent delimiter for {file_path}")
+
 def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame, dict]:
     try:
         debug_print(f"Reading file: {file_path}")
         
-        # Read with explicit parameters to handle potential formatting issues
-        if str(file_path).endswith('.tsv'):
-            df = pd.read_csv(file_path, sep='\t', skipinitialspace=True)
-        else:
-            df = pd.read_csv(
-                file_path,
-                sep=',',
-                skipinitialspace=True,
-                delim_whitespace=False,
-                dtype={'date': str}
-            )
-            
+        # Determine correct separator
+        sep = determine_separator(str(file_path))
+        debug_print(f"Detected separator: {repr(sep)}")
+        
+        # Read the file with detected separator
+        df = pd.read_csv(
+            file_path,
+            sep=sep,
+            skipinitialspace=True,
+            dtype={'date': str}
+        )
+        
         df['date'] = pd.to_datetime(df['date'])
         df = df[df['date'] >= start_date].copy()
         df.set_index('date', inplace=True)
