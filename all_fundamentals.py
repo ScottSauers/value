@@ -79,26 +79,64 @@ class CacheManager:
         # Get count from processed_tickers in ticker_cache.db
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute('''
-                SELECT COUNT(DISTINCT ticker) FROM processed_tickers 
-                WHERE status = 'success' 
+                SELECT COUNT(DISTINCT ticker) FROM processed_tickers
+                WHERE status = 'success'
                 AND last_processed > datetime("now", "-7 days")
             ''')
             ticker_count = cursor.fetchone()[0]
     
         # Get count from concept_cache in granular_cache.db
-        granular_db_path = self.cache_dir / 'granular_cache.db'
-        if granular_db_path.exists():
-            with sqlite3.connect(str(granular_db_path)) as conn:
-                cursor = conn.execute('''
-                    SELECT COUNT(DISTINCT ticker) FROM concept_cache
-                    WHERE last_updated > datetime("now", "-7 days")  
-                    AND concept_value IS NOT NULL  -- Only count successful entries
-                ''')
-                concept_count = cursor.fetchone()[0]
-        else:
+        try:
+            granular_db_path = self.cache_dir / 'granular_cache.db'
+            if granular_db_path.exists():
+                with sqlite3.connect(str(granular_db_path)) as conn:
+                    # First, check if last_updated column exists
+                    cursor = conn.execute('''
+                        SELECT COUNT(*) FROM pragma_table_info('concept_cache')
+                        WHERE name = 'last_updated'
+                    ''')
+                    has_timestamp = cursor.fetchone()[0] > 0
+    
+                    if has_timestamp:
+                        cursor = conn.execute('''
+                            SELECT COUNT(DISTINCT ticker) FROM concept_cache
+                            WHERE last_updated > datetime("now", "-7 days")
+                            AND concept_value IS NOT NULL
+                        ''')
+                    else:
+                        # If no timestamp column, count all records
+                        cursor = conn.execute('''
+                            SELECT COUNT(DISTINCT ticker) FROM concept_cache
+                            WHERE concept_value IS NOT NULL
+                        ''')
+                    concept_count = cursor.fetchone()[0]
+            else:
+                concept_count = 0
+        except Exception as e:
+            print(f"Warning: Error checking concept cache: {e}")
             concept_count = 0
     
         return max(ticker_count, concept_count)
+
+    def _check_schema(self):
+        """Check that the database schema is up to date."""
+        granular_db_path = self.cache_dir / 'granular_cache.db'
+        if granular_db_path.exists():
+            with sqlite3.connect(str(granular_db_path)) as conn:
+                # Check if last_updated column exists
+                cursor = conn.execute('''
+                    SELECT COUNT(*) FROM pragma_table_info('concept_cache')
+                    WHERE name = 'last_updated'
+                ''')
+                has_timestamp = cursor.fetchone()[0] > 0
+    
+                if not has_timestamp:
+                    # Add the timestamp column if it doesn't exist
+                    conn.execute('''
+                        ALTER TABLE concept_cache
+                        ADD COLUMN last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ''')
+
 
     def get_processed_tickers_in_batch(self, batch_tickers: List[str]) -> int:
         """Get count of successfully processed tickers from a specific batch."""
@@ -267,7 +305,7 @@ def process_ticker_batch(
                             progress_tracker.update_progress(None, completed_in_batch)
                             continue
             
-            # Ensure minimum interval between requests
+            # Check minimum interval between requests
             time_since_last_request = time.time() - last_request_time
             if time_since_last_request < MIN_REQUEST_INTERVAL:
                 sleep_time = MIN_REQUEST_INTERVAL - time_since_last_request
