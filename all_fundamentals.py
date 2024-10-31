@@ -132,10 +132,21 @@ class CacheManager:
                 has_timestamp = cursor.fetchone()[0] > 0
     
                 if not has_timestamp:
-                    # Add the timestamp column if it doesn't exist
+                    # First add the column without default
                     conn.execute('''
                         ALTER TABLE concept_cache
-                        ADD COLUMN last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        ADD COLUMN last_updated TIMESTAMP
+                    ''')
+                    # Then update all existing rows with current timestamp
+                    conn.execute('''
+                        UPDATE concept_cache 
+                        SET last_updated = datetime('now')
+                        WHERE last_updated IS NULL
+                    ''')
+                    # Then add an index for performance
+                    conn.execute('''
+                        CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated 
+                        ON concept_cache(last_updated)
                     ''')
 
 
