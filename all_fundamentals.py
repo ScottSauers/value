@@ -359,6 +359,7 @@ def parallel_process_tickers(
     ]
     
     # Get count of already processed tickers
+    already_processed_count = cache_manager.get_processed_tickers_count()
     logger.info(f"📋 Found {len(tickers)} unique tickers to process "
                 f"({already_processed_count} already processed, "
                 f"{len(tickers) - already_processed_count} remaining)")
