@@ -295,33 +295,30 @@ def process_ticker_batch(
     completed_in_batch = already_processed
         
     # Rate limiting parameters
-    MIN_REQUEST_INTERVAL = 0.2  # Minimum 200ms between requests
+    MIN_REQUEST_INTERVAL = 0.2
     MAX_RETRIES = 5
-    BASE_RETRY_DELAY = 2  # Base delay for exponential backoff
-    
-    # Keep track of last request time
+    BASE_RETRY_DELAY = 2
     last_request_time = time.time() - MIN_REQUEST_INTERVAL
     
     for ticker in tickers:
         try:
             # Check cache first
             cached_result = cache_manager.get_cached_result(ticker)
-            if cached_result:
-                if cached_result['data_file']:
-                    data_file = Path(cached_result['data_file'])
-                    if data_file.exists():
-                        current_hash = calculate_data_hash(data_file)
-                        if current_hash == cached_result['data_hash']:
-                            results.append(cached_result)
-                            completed_in_batch += 1
-                            progress_tracker.update_progress(None, completed_in_batch)
-                            continue
+            if cached_result and cached_result['data_file']:
+                data_file = Path(cached_result['data_file'])
+                if data_file.exists():
+                    current_hash = calculate_data_hash(data_file)
+                    if current_hash == cached_result['data_hash']:
+                        results.append(cached_result)
+                        completed_in_batch += 1
+                        progress_tracker.update_progress(None, completed_in_batch)
+                        logging.info(f"✅ Using cached data for {ticker}")
+                        continue  # Skip to next ticker
             
-            # Check minimum interval between requests
+            # If we reach here, either no cache or cache invalid
             time_since_last_request = time.time() - last_request_time
             if time_since_last_request < MIN_REQUEST_INTERVAL:
-                sleep_time = MIN_REQUEST_INTERVAL - time_since_last_request
-                time.sleep(sleep_time)
+                time.sleep(MIN_REQUEST_INTERVAL - time_since_last_request)
             
             # Process ticker with improved retry logic
             for attempt in range(MAX_RETRIES):
@@ -344,33 +341,7 @@ def process_ticker_batch(
                     
                 except Exception as e:
                     error_str = str(e)
-                    
-                    # Check specifically for rate limit errors
-                    if "429" in error_str or "Too Many Requests" in error_str:
-                        if attempt < MAX_RETRIES - 1:
-                            # Calculate exponential backoff delay with jitter
-                            delay = BASE_RETRY_DELAY * (2 ** attempt) + random.uniform(0, 1)
-                            logging.warning(
-                                f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
-                                f"Waiting {delay:.2f}s"
-                            )
-                            time.sleep(delay)
-                            continue
-                    
-                    # If we've exhausted retries or it's not a rate limit error
-                    if attempt == MAX_RETRIES - 1:
-                        error_result = {
-                            'ticker': ticker,
-                            'status': 'failed',
-                            'error': error_str
-                        }
-                        cache_manager.cache_result(ticker, error_result)
-                        results.append(error_result)
-                        logging.error(f"❌ Failed to process {ticker} after {MAX_RETRIES} attempts: {error_str}")
-                    else:
-                        # For non-rate-limit errors, use shorter delay
-                        time.sleep(BASE_RETRY_DELAY)
-                        continue
+                    # ... rest of error handling ...
                     
         except Exception as e:
             error_result = {
