@@ -91,7 +91,8 @@ class CacheManager:
             with sqlite3.connect(str(granular_db_path)) as conn:
                 cursor = conn.execute('''
                     SELECT COUNT(DISTINCT ticker) FROM concept_cache
-                    WHERE last_updated > datetime("now", "-7 days")
+                    WHERE last_updated > datetime("now", "-7 days")  
+                    AND concept_value IS NOT NULL  -- Only count successful entries
                 ''')
                 concept_count = cursor.fetchone()[0]
         else:
