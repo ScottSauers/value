@@ -50,6 +50,7 @@ def determine_separator(file_path: str) -> str:
 def filter_companies_by_data_quality(df: pd.DataFrame, threshold: float = 0.99) -> tuple[pd.DataFrame, dict]:
     """
     Filter companies based on data availability when other companies have data.
+    First removes entirely empty columns, then applies threshold-based filtering.
     
     Args:
         df: DataFrame with companies as columns and dates as index
@@ -62,7 +63,13 @@ def filter_companies_by_data_quality(df: pd.DataFrame, threshold: float = 0.99) 
     initial_companies = df.columns.tolist()
     initial_count = len(initial_companies)
     
-    # Calculate the minimum number of companies needed to consider a row valid
+    # First, identify and remove completely empty columns
+    empty_columns = df.columns[df.isna().all()].tolist()
+    df = df.drop(columns=empty_columns)
+    debug_print(f"Removed {len(empty_columns)} completely empty columns", empty_columns)
+    
+    # Now calculate the minimum number of companies needed to consider a row valid
+    # using the count of non-empty columns
     min_companies_threshold = int(len(df.columns) * threshold)
     
     # For each row, count how many companies have data
@@ -81,7 +88,7 @@ def filter_companies_by_data_quality(df: pd.DataFrame, threshold: float = 0.99) 
         if missing_in_valid_rows:
             companies_to_remove.add(company)
     
-    debug_print(f"Companies to be removed: {len(companies_to_remove)}", companies_to_remove)
+    debug_print(f"Companies to be removed due to missing data: {len(companies_to_remove)}", companies_to_remove)
     
     # Remove the identified companies
     remaining_companies = [col for col in df.columns if col not in companies_to_remove]
@@ -90,9 +97,12 @@ def filter_companies_by_data_quality(df: pd.DataFrame, threshold: float = 0.99) 
     # Calculate statistics
     stats = {
         'initial_company_count': initial_count,
+        'empty_columns': empty_columns,
+        'empty_columns_count': len(empty_columns),
         'removed_companies': list(companies_to_remove),
         'removed_count': len(companies_to_remove),
-        'removal_percentage': (len(companies_to_remove) / initial_count) * 100,
+        'total_removed': len(empty_columns) + len(companies_to_remove),
+        'removal_percentage': ((len(empty_columns) + len(companies_to_remove)) / initial_count) * 100,
         'remaining_count': len(remaining_companies)
     }
     
@@ -222,11 +232,18 @@ def main():
                 print(f"Date range: {stats['date_range'][0].date()} to {stats['date_range'][1].date()}")
                 print(f"Total dates in range: {stats['total_dates']}")
                 print(f"Initial companies: {stats['initial_company_count']}")
-                print(f"Removed companies: {stats['removed_count']} ({stats['removal_percentage']:.1f}%)")
+                print(f"Empty columns removed: {stats['empty_columns_count']}")
+                print(f"Companies removed due to missing data: {stats['removed_count']}")
+                print(f"Total removed: {stats['total_removed']} ({stats['removal_percentage']:.1f}%)")
                 print(f"Remaining companies: {stats['remaining_count']}")
                 
+                if stats['empty_columns_count'] > 0:
+                    print("\nCompletely empty columns removed:")
+                    for company in stats['empty_columns']:
+                        print(f"- {company.replace('_close', '')}")
+                
                 if stats['removed_count'] > 0:
-                    print("\nRemoved companies:")
+                    print("\nCompanies removed due to missing data:")
                     for company in stats['removed_companies']:
                         print(f"- {company.replace('_close', '')}")
                 
