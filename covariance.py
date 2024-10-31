@@ -117,8 +117,7 @@ def main():
     for file_path in [f for f in [latest_weekly, latest_daily] if f is not None]:
         print(f"\nProcessing {file_path.name}...")
         
-        # Set start date to 30 days ago for daily data, 180 days for weekly
-        days_lookback = 30 if 'price_data_1d_' in file_path.name else 180
+        days_lookback = 1825 if 'price_data_1d_' in file_path.name else 260
         start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_lookback)).strftime('%Y-%m-%d')
         
         try:
