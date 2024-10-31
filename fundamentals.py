@@ -19,7 +19,36 @@ class SECConcept:
     description: str = ""
 
 class SECDataExtractor:
-    """Extracts raw SEC fundamental data without derived calculations."""
+    """Extracts raw SEC fundamental data with granular caching."""
+    
+    def _init_granular_cache(self):
+        """Initialize SQLite database with granular caching tables."""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+            # Table for storing individual concept data
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS concept_cache (
+                    ticker TEXT,
+                    concept_tag TEXT,
+                    filing_date TEXT,
+                    value REAL,
+                    taxonomy TEXT,
+                    units TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (ticker, concept_tag, filing_date)
+                )
+            ''')
+            
+            # Table for tracking concept fetch status
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS concept_status (
+                    ticker TEXT,
+                    concept_tag TEXT,
+                    last_attempt TIMESTAMP,
+                    status TEXT,
+                    error TEXT,
+                    PRIMARY KEY (ticker, concept_tag)
+                )
+            ''')
     
     # Comprehensive list of SEC concepts to collect
     SEC_CONCEPTS = [
@@ -142,6 +171,55 @@ class SECDataExtractor:
         )
         self.logger = logging.getLogger(__name__)
 
+        self.cache_dir = Path(output_dir) / 'cache'
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._init_granular_cache()
+
+    def get_cached_concept(self, ticker: str, concept: SECConcept) -> Optional[pd.DataFrame]:
+        """Retrieve cached data for a specific concept if available."""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+            query = '''
+                SELECT filing_date, value 
+                FROM concept_cache 
+                WHERE ticker = ? AND concept_tag = ?
+                ORDER BY filing_date DESC
+            '''
+            df = pd.read_sql_query(query, conn, params=(ticker, concept.tag))
+            
+            if not df.empty:
+                return df
+        return None
+
+    def cache_concept_data(self, ticker: str, concept: SECConcept, data: pd.DataFrame):
+        """Cache the data for a specific concept."""
+        if data is None or data.empty:
+            return
+
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+            # Store the concept data
+            data['ticker'] = ticker
+            data['concept_tag'] = concept.tag
+            data['taxonomy'] = concept.taxonomy
+            data['units'] = concept.units
+            
+            data.to_sql('concept_cache', conn, if_exists='replace', index=False)
+            
+            # Update the status
+            conn.execute('''
+                INSERT OR REPLACE INTO concept_status 
+                (ticker, concept_tag, last_attempt, status)
+                VALUES (?, ?, CURRENT_TIMESTAMP, 'success')
+            ''', (ticker, concept.tag))
+
+    def cache_concept_error(self, ticker: str, concept: SECConcept, error: str):
+        """Cache error status for a concept."""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO concept_status 
+                (ticker, concept_tag, last_attempt, status, error)
+                VALUES (?, ?, CURRENT_TIMESTAMP, 'error', ?)
+            ''', (ticker, concept.tag, str(error)))
+
     def rate_limited_get(self, tag: str, ticker: str, taxonomy: str, units: str) -> pd.DataFrame:
         """
         Wrapper for the finagg.sec.api.company_concept.get method with rate limiting.
@@ -192,19 +270,20 @@ class SECDataExtractor:
             raise
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
-        """
-        Retrieve comprehensive SEC fundamental data for a ticker.
-        
-        Args:
-            ticker: Stock ticker symbol
-            
-        Returns:
-            DataFrame containing all fundamental data
-        """
+        """Retrieve SEC fundamental data with granular caching."""
         all_data = []
         
         for concept in self.SEC_CONCEPTS:
             try:
+                # Check cache first
+                cached_data = self.get_cached_concept(ticker, concept)
+                if cached_data is not None:
+                    self.logger.info(f"Using cached data for {ticker} {concept.tag}")
+                    if not cached_data.empty:
+                        all_data.append(cached_data)
+                    continue
+                
+                # If not cached, fetch from API
                 df = self.rate_limited_get(
                     tag=concept.tag,
                     ticker=ticker,
@@ -213,30 +292,31 @@ class SECDataExtractor:
                 )
                 
                 if not df.empty:
-                    # Keep only original filings
                     df = finagg.sec.api.filter_original_filings(df)
+                    df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
+                    df = df[['filing_date', concept.tag]]
                     
-                    # Rename value column to concept tag
-                    df = df.rename(columns={'value': concept.tag})
-                    
-                    # Keep only essential columns
-                    df = df[['end', concept.tag]]
-                    df = df.rename(columns={'end': 'filing_date'})
+                    # Cache the concept data
+                    self.cache_concept_data(ticker, concept, df)
                     
                     all_data.append(df)
-                    self.logger.info(f"Successfully retrieved {concept.tag} data for {ticker}")
+                    self.logger.info(f"Successfully retrieved and cached {concept.tag} data for {ticker}")
+                else:
+                    self.cache_concept_data(ticker, concept, pd.DataFrame())
+                    
             except Exception as e:
                 self.logger.warning(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
-                
+                self.cache_concept_error(ticker, concept, str(e))
+        
         if not all_data:
             self.logger.warning(f"No SEC data found for {ticker}")
             return pd.DataFrame()
-            
-        # Merge all data on filing date
+        
+        # Merge all available data
         merged_df = all_data[0]
         for df in all_data[1:]:
             merged_df = pd.merge(merged_df, df, on='filing_date', how='outer')
-            
+        
         # Sort by filing date
         merged_df = merged_df.sort_values('filing_date', ascending=False)
         
