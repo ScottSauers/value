@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 from dataclasses import dataclass
 from dotenv import load_dotenv
-from ratelimiter import RateLimiter  # Imported for rate limiting
+import threading
+import time
 
 @dataclass
 class SECConcept:
@@ -116,8 +117,43 @@ class SECDataExtractor:
         SECConcept("RevenueRemainingPerformanceObligation")
     ]
 
-    # Initialize a RateLimiter with a global rate limit of 5 requests per second
-    rate_limiter = RateLimiter(max_calls=5, period=1)
+    # Class-level variables for rate limiting
+    _rate_limit_lock = threading.Lock()
+    _request_timestamps: List[float] = []
+    _MAX_CALLS = 5
+    _PERIOD = 1  # seconds
+
+    @classmethod
+    def rate_limited(cls):
+        """
+        Decorator to enforce a global rate limit of MAX_CALLS per PERIOD seconds.
+        """
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                with cls._rate_limit_lock:
+                    current_time = time.time()
+                    # Remove timestamps older than PERIOD
+                    cls._request_timestamps = [
+                        timestamp for timestamp in cls._request_timestamps
+                        if current_time - timestamp < cls._PERIOD
+                    ]
+                    if len(cls._request_timestamps) >= cls._MAX_CALLS:
+                        # Calculate time to wait
+                        earliest_timestamp = cls._request_timestamps[0]
+                        sleep_time = cls._PERIOD - (current_time - earliest_timestamp)
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
+                        # After sleeping, remove the earliest timestamp
+                        current_time = time.time()
+                        cls._request_timestamps = [
+                            timestamp for timestamp in cls._request_timestamps
+                            if current_time - timestamp < cls._PERIOD
+                        ]
+                    # Record the current timestamp
+                    cls._request_timestamps.append(time.time())
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
 
     def __init__(self, output_dir: str = "./data"):
         """Initialize the extractor with output directory."""
@@ -143,6 +179,7 @@ class SECDataExtractor:
         )
         self.logger = logging.getLogger(__name__)
 
+    @rate_limited()
     def rate_limited_get(self, tag: str, ticker: str, taxonomy: str, units: str) -> pd.DataFrame:
         """
         Wrapper for the finagg.sec.api.company_concept.get method with rate limiting.
@@ -156,13 +193,12 @@ class SECDataExtractor:
         Returns:
             DataFrame containing the concept data
         """
-        with self.rate_limiter:
-            return finagg.sec.api.company_concept.get(
-                tag,
-                ticker=ticker,
-                taxonomy=taxonomy,
-                units=units
-            )
+        return finagg.sec.api.company_concept.get(
+            tag,
+            ticker=ticker,
+            taxonomy=taxonomy,
+            units=units
+        )
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """
@@ -179,7 +215,7 @@ class SECDataExtractor:
         for concept in self.SEC_CONCEPTS:
             try:
                 df = self.rate_limited_get(
-                    concept.tag,
+                    tag=concept.tag,
                     ticker=ticker,
                     taxonomy=concept.taxonomy,
                     units=concept.units
