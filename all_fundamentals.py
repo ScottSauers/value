@@ -374,7 +374,6 @@ def parallel_process_tickers(
     # Process batches in parallel
     start_time = datetime.now()
     results = []
-    completed_total = 0
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit batch processing jobs
