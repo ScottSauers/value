@@ -1,10 +1,27 @@
+import os
 import concurrent.futures
 import pandas as pd
 from pathlib import Path
 import logging
 from datetime import datetime
 from typing import List, Optional
-from fundamentals import SECDataExtractor
+import finagg
+from dotenv import load_dotenv
+
+def setup_environment():
+    """Set up environment variables and configurations."""
+    load_dotenv()
+    
+    # Check if SEC_API_USER_AGENT is properly configured
+    sec_user_agent = os.getenv('SEC_API_USER_AGENT')
+    if not sec_user_agent or sec_user_agent == "Your Name your-email@example.com":
+        raise EnvironmentError(
+            "SEC_API_USER_AGENT is not properly configured. "
+            "Please update your .env file with your actual name and email"
+        )
+    
+    # Configure finagg with SEC user agent
+    finagg.sec.api.company_concept.SEC_USER_AGENT = sec_user_agent
 
 def setup_logging(output_dir: Path) -> logging.Logger:
     """Set up logging configuration."""
@@ -21,6 +38,7 @@ def setup_logging(output_dir: Path) -> logging.Logger:
 def process_ticker(ticker: str, output_dir: Path) -> dict:
     """Process a single ticker and return results."""
     try:
+        from fundamentals import SECDataExtractor  # Import here to avoid circular imports
         extractor = SECDataExtractor(str(output_dir))
         data_file, metadata_file = extractor.process_ticker(ticker)
         return {
@@ -40,25 +58,16 @@ def parallel_process_tickers(
     input_file: str,
     output_dir: str,
     max_workers: Optional[int] = None,
-    ticker_column: str = 'ticker'
+    ticker_column: str = 'ticker',
+    batch_size: int = 100  # Process tickers in batches
 ) -> pd.DataFrame:
-    """
-    Process multiple tickers in parallel to collect SEC fundamental data.
-    
-    Args:
-        input_file: Path to CSV file containing ticker symbols
-        output_dir: Directory to save output files
-        max_workers: Maximum number of parallel workers (None for CPU count)
-        ticker_column: Name of column containing ticker symbols
-    
-    Returns:
-        DataFrame with processing results
-    """
+    """Process multiple tickers in parallel to collect SEC fundamental data."""
     # Create output directory
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Setup logging
+    # Setup environment and logging
+    setup_environment()
     logger = setup_logging(output_path)
     
     # Read ticker list
@@ -70,27 +79,31 @@ def parallel_process_tickers(
         logger.error(f"Failed to read input file: {str(e)}")
         raise
     
-    # Process tickers in parallel
+    # Process tickers in batches
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_ticker = {
-            executor.submit(process_ticker, ticker, output_path): ticker 
-            for ticker in tickers
-        }
+    for i in range(0, len(tickers), batch_size):
+        batch_tickers = tickers[i:i + batch_size]
+        logger.info(f"Processing batch {i//batch_size + 1} ({len(batch_tickers)} tickers)")
         
-        for future in concurrent.futures.as_completed(future_to_ticker):
-            ticker = future_to_ticker[future]
-            try:
-                result = future.result()
-                results.append(result)
-                logger.info(f"Completed processing {ticker}: {result['status']}")
-            except Exception as e:
-                logger.error(f"Exception processing {ticker}: {str(e)}")
-                results.append({
-                    'ticker': ticker,
-                    'status': 'failed',
-                    'error': str(e)
-                })
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_ticker = {
+                executor.submit(process_ticker, ticker, output_path): ticker 
+                for ticker in batch_tickers
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                ticker = future_to_ticker[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    logger.info(f"Completed processing {ticker}: {result['status']}")
+                except Exception as e:
+                    logger.error(f"Exception processing {ticker}: {str(e)}")
+                    results.append({
+                        'ticker': ticker,
+                        'status': 'failed',
+                        'error': str(e)
+                    })
     
     # Create summary DataFrame
     results_df = pd.DataFrame(results)
@@ -101,6 +114,14 @@ def parallel_process_tickers(
     results_df.to_csv(summary_file, index=False)
     logger.info(f"Processing summary saved to {summary_file}")
     
+    # Print summary statistics
+    success_count = len(results_df[results_df['status'] == 'success'])
+    fail_count = len(results_df[results_df['status'] == 'failed'])
+    logger.info(f"\nProcessing Summary:")
+    logger.info(f"Total tickers processed: {len(results_df)}")
+    logger.info(f"Successful: {success_count}")
+    logger.info(f"Failed: {fail_count}")
+    
     return results_df
 
 def main():
@@ -110,23 +131,20 @@ def main():
     OUTPUT_DIR = './data/fundamentals'
     MAX_WORKERS = None  # None will use CPU count
     TICKER_COLUMN = 'ticker'
+    BATCH_SIZE = 100
     
     try:
         results = parallel_process_tickers(
             input_file=INPUT_FILE,
             output_dir=OUTPUT_DIR,
             max_workers=MAX_WORKERS,
-            ticker_column=TICKER_COLUMN
+            ticker_column=TICKER_COLUMN,
+            batch_size=BATCH_SIZE
         )
-        
-        # Print summary
-        print("\nProcessing Summary:")
-        print(f"Total tickers processed: {len(results)}")
-        print(f"Successful: {len(results[results['status'] == 'success'])}")
-        print(f"Failed: {len(results[results['status'] == 'failed'])}")
         
     except Exception as e:
         print(f"Failed to complete processing: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()
