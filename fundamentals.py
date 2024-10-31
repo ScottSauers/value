@@ -31,7 +31,7 @@ class SECDataExtractor:
                     ticker TEXT,
                     concept_tag TEXT,
                     filing_date TEXT,
-                    concept_value REAL,  # Changed from 'value' to avoid SQL keyword
+                    concept_value REAL,
                     taxonomy TEXT,
                     units TEXT,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
