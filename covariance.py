@@ -11,9 +11,16 @@ def debug_print(msg, data=None, max_lines=10):
             print("First {max_lines} rows:")
             print(data.head(max_lines))
         elif isinstance(data, (list, set)):
-            print(f"Length: {len(data)}")
-            print("First {max_lines} items:")
-            print(list(data)[:max_lines])
+            data_list = list(data)
+            print(f"Length: {len(data_list)}")
+            if len(data_list) > 20:  # If more than 20 items, show first and last 10
+                print("First 10 items:")
+                print(data_list[:10])
+                print("Last 10 items:")
+                print(data_list[-10:])
+            else:
+                print(f"All items:")
+                print(data_list)
         else:
             print(data)
     sys.stdout.flush()
@@ -41,11 +48,13 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         
         # Get only companies with data
         companies_with_data = []
+        min_valid_points = 30  # Minimum number of valid data points required
         for col in price_cols:
             valid_data = df[col].notna()
-            if valid_data.any():
+            valid_count = valid_data.sum()
+            if valid_count >= min_valid_points:
                 companies_with_data.append(col)
-                debug_print(f"Company {col}: {valid_data.sum()} valid data points")
+                debug_print(f"Company {col}: {valid_count} valid data points")
         
         debug_print(f"Companies with any data: {len(companies_with_data)}", companies_with_data)
         debug_print("Sample of data:", df[companies_with_data].head())
@@ -74,12 +83,6 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
 def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate covariance matrix with improved handling of missing data.
-    
-    Args:
-        df: DataFrame with date index and price columns ending in '_close'
-        
-    Returns:
-        DataFrame containing the covariance matrix
     """
     debug_print("Starting covariance calculation")
     
@@ -90,26 +93,37 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     if not price_columns:
         raise ValueError("No valid price columns found after cleaning")
     
-    # Calculate returns
-    returns = df[price_columns].pct_change()
+    # Calculate returns with explicit fill_method=None
+    returns = df[price_columns].pct_change(fill_method=None)
     debug_print(f"Returns shape before processing: {returns.shape}")
     debug_print("Sample returns:", returns.head())
     
     # Instead of dropping all NA rows, we'll calculate pairwise covariances
     cov_matrix = pd.DataFrame(index=price_columns, columns=price_columns)
+    min_periods = 30  # Minimum number of overlapping periods required
+    
+    total_pairs = len(price_columns) * (len(price_columns) - 1) // 2
+    processed_pairs = 0
     
     for i, col1 in enumerate(price_columns):
         for j, col2 in enumerate(price_columns[i:], i):
             # Get paired data without NaNs
-            paired_data = returns[[col1, col2]].dropna()
+            paired_data = pd.DataFrame({
+                'col1': returns[col1],
+                'col2': returns[col2]
+            }).dropna()
             
-            if len(paired_data) > 1:  # Need at least 2 points for covariance
-                cov = paired_data[col1].cov(paired_data[col2])
+            if len(paired_data) >= min_periods:
+                cov = paired_data['col1'].cov(paired_data['col2'])
                 cov_matrix.loc[col1, col2] = cov
                 cov_matrix.loc[col2, col1] = cov  # Matrix is symmetric
             else:
                 cov_matrix.loc[col1, col2] = np.nan
                 cov_matrix.loc[col2, col1] = np.nan
+            
+            processed_pairs += 1
+            if processed_pairs % 1000 == 0:
+                print(f"Processed {processed_pairs}/{total_pairs} pairs...")
     
     debug_print(f"Covariance matrix shape: {cov_matrix.shape}")
     debug_print("Sample of covariance matrix:", cov_matrix.iloc[:5, :5])
