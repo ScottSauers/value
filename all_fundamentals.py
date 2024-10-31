@@ -27,6 +27,7 @@ class CacheManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / 'ticker_cache.db'
         self._init_db()
+        self._check_schema()
 
     def _init_db(self):
         """Initialize SQLite database with necessary tables."""
