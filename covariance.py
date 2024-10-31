@@ -2,10 +2,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import sys
-from datetime import datetime
 
 def debug_print(msg, data=None, max_lines=10):
-    """Print debug information with optional data preview"""
     print(f"\nDEBUG: {msg}")
     if data is not None:
         if isinstance(data, pd.DataFrame):
@@ -24,26 +22,28 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
     try:
         debug_print(f"Reading file: {file_path}")
         
+        # Read with explicit date parser
+        parse_dates = {'date': '%Y-%m-%d'}
         if str(file_path).endswith('.tsv'):
-            df = pd.read_csv(file_path, sep='\t')
+            df = pd.read_csv(file_path, sep='\t', parse_dates=parse_dates)
         else:
-            df = pd.read_csv(file_path)
+            df = pd.read_csv(file_path, parse_dates=parse_dates)
         
         debug_print("Initial dataframe:", df)
         debug_print("Columns:", df.columns.tolist())
         
-        df['date'] = pd.to_datetime(df['date'])
-        debug_print("Date range:", f"{df['date'].min()} to {df['date'].max()}")
-        
+        # Filter data after start date
         df = df[df['date'] >= start_date].copy()
         debug_print(f"After filtering to start_date {start_date}:", df)
         
         if df.empty:
             raise ValueError(f"No data found after {start_date}")
         
+        # Get price columns
         price_cols = [col for col in df.columns if col.endswith('_close')]
         debug_print("Price columns found:", price_cols)
         
+        # Get companies with any data
         companies_with_data = []
         for col in price_cols:
             valid_data = df[col].notna()
@@ -64,23 +64,25 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
             'total_dates': len(df)
         }
         
-        # Get dates where more than 90% of companies have data
         companies_to_remove = set()
         total_companies = len(companies_with_data)
-        threshold = 0.1  # 10% missing data threshold
+        threshold = 0.1  # 10% threshold
         
-        for date in df['date'].unique():
-            day_data = df[df['date'] == date][companies_with_data]
-            missing_count = day_data.isna().sum()
-            missing_ratio = missing_count / total_companies
-            
-            # Identify companies missing data when >90% of others have it
-            problematic_companies = missing_count[missing_ratio < threshold].index
-            companies_to_remove.update(problematic_companies)
-            
-            debug_print(f"Date {date}: {len(problematic_companies)} companies removed (missing when >90% have data)")
+        # Check each company's data pattern
+        for company in companies_with_data:
+            missing_ratios = []
+            for date in df['date'].unique():
+                day_data = df[df['date'] == date][companies_with_data]
+                present_companies = day_data.notna().sum()
+                max_present = present_companies.max()
+                if max_present > 0:  # Only check days where some companies have data
+                    company_present = day_data[company].notna().sum()
+                    if company_present == 0 and (present_companies / total_companies > (1 - threshold)):
+                        # Company is missing when >90% of others have data
+                        companies_to_remove.add(company)
+                        break
         
-        debug_print("Total companies marked for removal:", companies_to_remove)
+        debug_print(f"Companies to remove: {len(companies_to_remove)}")
         
         clean_companies = [c for c in companies_with_data if c not in companies_to_remove]
         debug_print("Clean companies remaining:", clean_companies)
