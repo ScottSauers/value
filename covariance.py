@@ -21,11 +21,9 @@ def debug_print(msg, data=None, max_lines=10):
     sys.stdout.flush()
 
 def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame, dict]:
-    """Load and process price data, with extensive debugging output"""
     try:
         debug_print(f"Reading file: {file_path}")
         
-        # Read the file
         if str(file_path).endswith('.tsv'):
             df = pd.read_csv(file_path, sep='\t')
         else:
@@ -34,22 +32,18 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         debug_print("Initial dataframe:", df)
         debug_print("Columns:", df.columns.tolist())
         
-        # Convert date column
         df['date'] = pd.to_datetime(df['date'])
         debug_print("Date range:", f"{df['date'].min()} to {df['date'].max()}")
         
-        # Filter data after start date
         df = df[df['date'] >= start_date].copy()
         debug_print(f"After filtering to start_date {start_date}:", df)
         
         if df.empty:
             raise ValueError(f"No data found after {start_date}")
         
-        # Get list of price columns
         price_cols = [col for col in df.columns if col.endswith('_close')]
         debug_print("Price columns found:", price_cols)
         
-        # Get companies that have any data
         companies_with_data = []
         for col in price_cols:
             valid_data = df[col].notna()
@@ -62,7 +56,6 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         if not companies_with_data:
             raise ValueError("No companies with valid price data found")
             
-        # Initialize statistics
         stats = {
             'initial_companies': len(companies_with_data),
             'removed_companies': [],
@@ -71,35 +64,24 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
             'total_dates': len(df)
         }
         
-        # Find valid trading days (where at least one company has data)
-        valid_days = df[companies_with_data].notna().any(axis=1)
-        trading_days = df[valid_days]['date']
-        debug_print(f"Found {len(trading_days)} trading days with any data")
-        
-        # Initialize problematic companies set
+        # Get dates where more than 90% of companies have data
         companies_to_remove = set()
+        total_companies = len(companies_with_data)
+        threshold = 0.1  # 10% missing data threshold
         
-        # For each trading day
-        for date in trading_days:
+        for date in df['date'].unique():
             day_data = df[df['date'] == date][companies_with_data]
-            companies_with_data_today = day_data.notna().any()
+            missing_count = day_data.isna().sum()
+            missing_ratio = missing_count / total_companies
             
-            if companies_with_data_today.sum() > 0:
-                debug_print(f"Date {date}: {companies_with_data_today.sum()} companies have data")
-                
-                # Check each company
-                for company in companies_with_data:
-                    if pd.isna(day_data[company]).all():  # Company is missing data
-                        other_companies = [c for c in companies_with_data if c != company]
-                        others_have_data = day_data[other_companies].notna().any().any()
-                        
-                        if others_have_data:
-                            companies_to_remove.add(company)
-                            debug_print(f"Marking {company} for removal: missing data when others have it on {date}")
+            # Identify companies missing data when >90% of others have it
+            problematic_companies = missing_count[missing_ratio < threshold].index
+            companies_to_remove.update(problematic_companies)
+            
+            debug_print(f"Date {date}: {len(problematic_companies)} companies removed (missing when >90% have data)")
         
-        debug_print("Companies marked for removal:", companies_to_remove)
+        debug_print("Total companies marked for removal:", companies_to_remove)
         
-        # Keep only clean companies
         clean_companies = [c for c in companies_with_data if c not in companies_to_remove]
         debug_print("Clean companies remaining:", clean_companies)
         
@@ -110,7 +92,6 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
             df_clean = df[['date']].copy()
             debug_print("WARNING: No clean companies remain!")
         
-        # Update statistics
         stats['removed_companies'] = list(companies_to_remove)
         stats['final_companies'] = len(clean_companies)
         stats['removal_percentage'] = (len(companies_to_remove) / stats['initial_companies'] * 100)
@@ -124,7 +105,6 @@ def load_and_process_data(file_path: str, start_date: str) -> tuple[pd.DataFrame
         raise
 
 def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
-    """Calculate covariance matrix with debugging output"""
     debug_print("Starting covariance calculation")
     
     price_columns = [col for col in df.columns if col.endswith('_close')]
@@ -133,19 +113,15 @@ def calculate_covariance(df: pd.DataFrame) -> pd.DataFrame:
     if not price_columns:
         raise ValueError("No valid price columns found after cleaning")
     
-    # Calculate returns
     returns = df[price_columns].pct_change()
     debug_print("Returns calculation:", returns)
     
-    # Drop NA rows
     returns_clean = returns.dropna()
     debug_print("Clean returns shape:", returns_clean.shape)
     
-    # Calculate covariance matrix
     cov_matrix = returns_clean.cov()
     debug_print("Covariance matrix shape:", cov_matrix.shape)
     
-    # Clean up column names
     cov_matrix.columns = [col.replace('_close', '') for col in cov_matrix.columns]
     cov_matrix.index = [col.replace('_close', '') for col in cov_matrix.index]
     
