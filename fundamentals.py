@@ -228,37 +228,61 @@ class SECDataExtractor:
                     conn.execute('''
                         INSERT OR REPLACE INTO concept_cache
                         (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
-                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'not_reported', datetime('now'))
+                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'N/A', datetime('now'))
                     ''', (ticker, concept.tag, concept.taxonomy, concept.units))
                     conn.commit()
+                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
                     return
                 
                 # Prepare data for caching
                 cache_df = data.copy()
                 if concept.tag not in cache_df.columns:
+                    # If the expected tag is missing, treat it as 'N/A'
+                    conn.execute('''
+                        INSERT OR REPLACE INTO concept_cache
+                        (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
+                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'N/A', datetime('now'))
+                    ''', (ticker, concept.tag, concept.taxonomy, concept.units))
+                    conn.commit()
+                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag} due to missing tag in data")
                     return
-    
+
+                # Rename the concept column to 'concept_value'
                 cache_df = cache_df.rename(columns={concept.tag: 'concept_value'})
                 cache_df['ticker'] = ticker
                 cache_df['concept_tag'] = concept.tag
                 cache_df['taxonomy'] = concept.taxonomy
                 cache_df['units'] = concept.units
-                cache_df['fetch_status'] = 'success'
+                
+                # Determine fetch_status based on concept_value
+                if cache_df['concept_value'].iloc[0] == 'N/A':
+                    cache_df['fetch_status'] = 'N/A'
+                else:
+                    cache_df['fetch_status'] = 'success'
+                
                 cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-                # Delete existing data
+
+                # Delete existing data for the ticker and concept
                 conn.execute('''
                     DELETE FROM concept_cache
                     WHERE ticker = ? AND concept_tag = ?
                 ''', (ticker, concept.tag))
-    
+
                 # Insert new data
                 cache_df.to_sql('concept_cache', conn, if_exists='append',
                                index=False, method='multi')
                 
                 conn.commit()
+                
+                status = cache_df['fetch_status'].iloc[0]
+                if status == 'success':
+                    self.logger.info(f"Successfully cached data for {ticker} {concept.tag}")
+                elif status == 'N/A':
+                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
+                    
             except Exception as e:
                 conn.rollback()
+                self.logger.error(f"Error caching data for {ticker} {concept.tag}: {e}")
                 raise
 
     def cache_concept_error(self, ticker: str, concept: SECConcept, error: str):
