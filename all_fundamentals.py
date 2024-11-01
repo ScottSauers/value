@@ -109,47 +109,26 @@ class CacheManager:
 
     def get_processed_tickers_count(self) -> int:
         """Get count of successfully processed tickers within the last 7 days."""
-        # Get count from processed_tickers in ticker_cache.db
-        with sqlite3.connect(str(self.db_path)) as conn:
-            cursor = conn.execute('''
-                SELECT COUNT(DISTINCT ticker) FROM processed_tickers
-                WHERE status = 'success'
-                AND last_processed > datetime("now", "-7 days")
-            ''')
-            ticker_count = cursor.fetchone()[0]
-    
-        # Get count from concept_cache in granular_cache.db
         try:
             granular_db_path = self.cache_dir / 'granular_cache.db'
             if granular_db_path.exists():
                 with sqlite3.connect(str(granular_db_path)) as conn:
-                    # First, check if last_updated column exists
+                    # Count tickers with substantial data (>100 concepts)
                     cursor = conn.execute('''
-                        SELECT COUNT(*) FROM pragma_table_info('concept_cache')
-                        WHERE name = 'last_updated'
-                    ''')
-                    has_timestamp = cursor.fetchone()[0] > 0
-    
-                    if has_timestamp:
-                        cursor = conn.execute('''
-                            SELECT COUNT(DISTINCT ticker) FROM concept_cache
+                        SELECT COUNT(DISTINCT ticker) 
+                        FROM (
+                            SELECT ticker
+                            FROM concept_cache 
                             WHERE last_updated > datetime("now", "-7 days")
-                            AND concept_value IS NOT NULL
-                        ''')
-                    else:
-                        # If no timestamp column, count all records
-                        cursor = conn.execute('''
-                            SELECT COUNT(DISTINCT ticker) FROM concept_cache
-                            WHERE concept_value IS NOT NULL
-                        ''')
-                    concept_count = cursor.fetchone()[0]
-            else:
-                concept_count = 0
+                            GROUP BY ticker 
+                            HAVING COUNT(*) > 100
+                        )
+                    ''')
+                    return cursor.fetchone()[0]
+            return 0
         except Exception as e:
             print(f"Warning: Error checking concept cache: {e}")
-            concept_count = 0
-    
-        return max(ticker_count, concept_count)
+            return 0
 
     def _check_schema(self):
         """Check that the database schema is up to date."""
