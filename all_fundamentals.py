@@ -380,12 +380,21 @@ def process_ticker_batch(
                 try:
                     data_file, metadata_file = extractor.process_ticker(ticker)
                     
-                    result = {
-                        'ticker': ticker,
-                        'status': 'success',
-                        'data_file': str(data_file),
-                        'metadata_file': str(metadata_file)
-                    }
+                    if data_file == "N/A" and metadata_file == "N/A":
+                        # All concepts returned 'N/A'; mark as skipped
+                        result = {
+                            'ticker': ticker,
+                            'status': 'N/A',
+                            'data_file': "N/A",
+                            'metadata_file': "N/A"
+                        }
+                    else:
+                        result = {
+                            'ticker': ticker,
+                            'status': 'success',
+                            'data_file': str(data_file),
+                            'metadata_file': str(metadata_file)
+                        }
                     
                     cache_manager.cache_result(ticker, result)
                     results.append(result)
