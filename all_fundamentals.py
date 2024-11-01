@@ -174,23 +174,30 @@ class CacheManager:
             return cursor.fetchone()[0]
 
     def cache_result(self, ticker: str, result: Dict):
-        """Cache the processing result for a ticker."""
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute(
-                '''
-                INSERT OR REPLACE INTO processed_tickers 
-                (ticker, last_processed, status, data_file, metadata_file, error, data_hash)
-                VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
-                ''',
-                (
-                    ticker,
-                    result['status'],
-                    result.get('data_file'),
-                    result.get('metadata_file'),
-                    result.get('error'),
-                    result.get('data_hash')
-                )
-            )
+        """Cache the processing result for a ticker with transaction safety."""
+        with self._lock:  # Use the existing lock
+            with sqlite3.connect(str(self.db_path)) as conn:
+                try:
+                    conn.execute('BEGIN IMMEDIATE')  # Ensure atomic operation
+                    conn.execute('''
+                        INSERT OR REPLACE INTO processed_tickers 
+                        (ticker, last_processed, status, data_file, metadata_file, error, data_hash)
+                        VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
+                        ''',
+                        (
+                            ticker,
+                            result['status'],
+                            result.get('data_file'),
+                            result.get('metadata_file'),
+                            result.get('error'),
+                            result.get('data_hash')
+                        )
+                    )
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    raise
+
 
     def save_batch_stats(self, batch_id: str, stats: Dict):
         """Save statistics for a processing batch."""
