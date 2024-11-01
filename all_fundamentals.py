@@ -54,6 +54,27 @@ class CacheManager:
                 )
             ''')
 
+    def resync_ticker_cache(self):
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as gconn:
+            # Get all successfully processed tickers from granular
+            cursor = gconn.execute('''
+                SELECT DISTINCT ticker FROM concept_cache 
+                WHERE concept_value IS NOT NULL
+            ''')
+            successful_tickers = [row[0] for row in cursor.fetchall()]
+        
+        with sqlite3.connect(str(self.db_path)) as conn:
+            # Clear existing records
+            conn.execute('DELETE FROM processed_tickers')
+            
+            # Add successful records
+            for ticker in successful_tickers:
+                conn.execute('''
+                    INSERT INTO processed_tickers 
+                    (ticker, last_processed, status)
+                    VALUES (?, datetime('now'), 'success')
+                ''', (ticker,))
+
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
         with self._lock:
