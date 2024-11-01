@@ -516,7 +516,7 @@ def main():
     """Main execution function with configuration."""
     # Configuration
     INPUT_FILE = 'small_cap_stocks_latest.csv'
-    OUTPUT_DIR = './data'
+    OUTPUT_DIR = './data/fundamentals'
     MAX_WORKERS = 8
     TICKER_COLUMN = 'ticker'
     BATCH_SIZE = 25
