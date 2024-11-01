@@ -109,11 +109,21 @@ class CacheManager:
 
     def get_processed_tickers_count(self) -> int:
         """Get count of successfully processed tickers within the last 7 days."""
+        # Get count from processed_tickers in ticker_cache.db
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute('''
+                SELECT COUNT(DISTINCT ticker) FROM processed_tickers
+                WHERE status = 'success'
+                AND last_processed > datetime("now", "-7 days")
+            ''')
+            ticker_count = cursor.fetchone()[0]
+    
+        # Get count from concept_cache in granular_cache.db
         try:
             granular_db_path = self.cache_dir / 'granular_cache.db'
             if granular_db_path.exists():
                 with sqlite3.connect(str(granular_db_path)) as conn:
-                    # Count tickers with substantial data (>100 concepts)
+                    # Count tickers with substantial data
                     cursor = conn.execute('''
                         SELECT COUNT(DISTINCT ticker) 
                         FROM (
@@ -124,11 +134,14 @@ class CacheManager:
                             HAVING COUNT(*) > 100
                         )
                     ''')
-                    return cursor.fetchone()[0]
-            return 0
+                    concept_count = cursor.fetchone()[0]
+            else:
+                concept_count = 0
         except Exception as e:
             print(f"Warning: Error checking concept cache: {e}")
-            return 0
+            concept_count = 0
+    
+        return max(ticker_count, concept_count)
 
     def _check_schema(self):
         """Check that the database schema is up to date."""
