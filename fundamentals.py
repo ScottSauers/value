@@ -441,8 +441,11 @@ class SECDataExtractor:
         
         try:
             df = self.get_sec_data(ticker)
-            if df.empty:
-                raise ValueError(f"No SEC data found for {ticker}")
+            
+            # Check if all concepts are 'N/A'
+            if df.empty or all(df[col].iloc[0] == 'N/A' for col in df.columns if col != 'filing_date'):
+                self.logger.warning(f"All concepts returned 'N/A' for {ticker}. Skipping save.")
+                return ("N/A", "N/A")
             
             # Sort DataFrame consistently to ensure same content produces same hash
             df = df.sort_values(['filing_date'] + list(df.columns.drop('filing_date')))
