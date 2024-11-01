@@ -56,26 +56,24 @@ class CacheManager:
             ''')
 
     def resync_ticker_cache(self):
-        """Completely rebuild ticker_cache.db from granular data"""
-        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as gconn:
-            # Get fuller picture of ticker completion
-            cursor = gconn.execute('''
-                SELECT ticker, COUNT(DISTINCT concept_tag) as concept_count,
-                       MAX(last_updated) as last_update
-                FROM concept_cache 
-                WHERE concept_value IS NOT NULL
-                GROUP BY ticker
-                HAVING concept_count > 5  -- Consider "complete" if has multiple concepts
-            ''')
-            ticker_stats = cursor.fetchall()
+        """Rebuild cache from actual TSV files saved in last day"""
+        data_dir = self.cache_dir.parent
+        # Find all SEC data files modified in last day
+        cmd = f"find {data_dir} -name '*sec_data_*.tsv' -type f -mtime -1"
+        import subprocess
+        completed_files = subprocess.check_output(cmd, shell=True).decode().splitlines()
         
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute('DELETE FROM processed_tickers')
-            conn.executemany('''
-                INSERT INTO processed_tickers 
-                (ticker, last_processed, status, error)
-                VALUES (?, ?, 'success', NULL)
-            ''', [(t[0], t[2]) for t in ticker_stats])
+            # For each file found
+            for file_path in completed_files:
+                ticker = os.path.basename(file_path).split('_')[0]  # Get ticker from filename
+                conn.execute('''
+                    INSERT OR REPLACE INTO processed_tickers 
+                    (ticker, last_processed, status, data_file, metadata_file)
+                    VALUES (?, datetime('now'), 'success', ?, ?)
+                ''', (ticker, file_path, file_path.replace('.tsv', '.json')))
+
 
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
