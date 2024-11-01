@@ -369,7 +369,7 @@ class SECDataExtractor:
                     all_data.append(df)
                     self.logger.info(f"Successfully retrieved and cached {concept.tag} data for {ticker}")
                 else:
-                    # Cache empty result
+                    # Cache 'N/A' result
                     self.cache_concept_data(ticker, concept, pd.DataFrame())
                     
             except Exception as e:
