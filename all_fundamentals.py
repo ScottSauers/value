@@ -26,6 +26,7 @@ class CacheManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / 'ticker_cache.db'
         self._lock = threading.Lock()
+        self.logger = logging.getLogger(__name__)
         self._init_db()
         self._check_schema()
         self.resync_ticker_cache()
@@ -56,42 +57,63 @@ class CacheManager:
             ''')
 
     def resync_ticker_cache(self):
-        """Completely rebuild ticker_cache.db from both granular data and files"""
-        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as gconn:
-            # Get completion from granular cache
-            cursor = gconn.execute('''
-                SELECT ticker, COUNT(DISTINCT concept_tag) as concept_count,
-                       MAX(last_updated) as last_update
-                FROM concept_cache 
-                WHERE concept_value IS NOT NULL
-                GROUP BY ticker
-                HAVING concept_count > 5  -- Consider "complete" if has multiple concepts
-            ''')
-            ticker_stats = cursor.fetchall()
-            ticker_stats_dict = {t[0]: t[2] for t in ticker_stats}
-    
-            # Also check saved files
-            data_dir = Path(self.cache_dir).parent.parent  # Go up to data/
-            cmd = f"find {data_dir} -name '*sec_data_*.tsv' -type f -mtime -1"
-            import subprocess
-            completed_files = subprocess.check_output(cmd, shell=True).decode().splitlines()
-            
-            # Add file-based completions
-            for file_path in completed_files:
-                ticker = os.path.basename(file_path).split('_')[0]
-                if ticker not in ticker_stats_dict:
-                    # Use file timestamp
-                    timestamp = datetime.fromtimestamp(os.path.getmtime(file_path))
-                    ticker_stats_dict[ticker] = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        
+        """Rebuild ticker_cache.db by identifying tickers with .tsv files modified in the last 24 hours."""
+        ticker_stats_dict = {}
+
+        # Fetch tickers with substantial data from granular_cache.db
+        granular_cache_path = self.cache_dir / 'granular_cache.db'
+        if granular_cache_path.exists():
+            with sqlite3.connect(str(granular_cache_path)) as gconn:
+                cursor = gconn.execute('''
+                    SELECT ticker, COUNT(DISTINCT concept_tag) as concept_count,
+                           MAX(last_updated) as last_update
+                    FROM concept_cache 
+                    WHERE concept_value IS NOT NULL
+                    GROUP BY ticker
+                    HAVING concept_count > 5  -- Consider "complete" if has multiple concepts
+                ''')
+                ticker_stats = cursor.fetchall()
+                ticker_stats_dict = {t[0]: t[2] for t in ticker_stats}
+
+        # Now scan the data directory for .tsv files modified in the last 24 hours
+        data_dir = self.cache_dir.parent.parent  # Adjust this path as needed
+        cutoff_time = datetime.now() - timedelta(days=1)
+        recent_files = list(data_dir.glob('**/*sec_data_*.tsv'))
+        recent_tickers = {}
+
+        for file_path in recent_files:
+            modification_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+            if modification_time >= cutoff_time:
+                # Extract ticker from filename, assuming the format "TICKER_sec_data_TIMESTAMP.tsv"
+                filename = file_path.stem  # e.g., "AAPL_sec_data_20231030_123456"
+                ticker = filename.split('_')[0]
+                recent_tickers[ticker] = modification_time.strftime('%Y-%m-%d %H:%M:%S')
+
+        # Merge tickers from granular_cache.db and recent .tsv files
+        for ticker, mod_time in recent_tickers.items():
+            ticker_stats_dict[ticker] = mod_time  # Recent .tsv files take precedence
+
         # Write all completions to ticker_cache.db
         with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute('DELETE FROM processed_tickers')
-            conn.executemany('''
-                INSERT INTO processed_tickers 
-                (ticker, last_processed, status, error)
-                VALUES (?, ?, 'success', NULL)
-            ''', [(t, v) for t, v in ticker_stats_dict.items()])
+            # Start a transaction for atomicity
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                # Clear existing processed tickers
+                conn.execute('DELETE FROM processed_tickers')
+
+                # Insert updated processed tickers
+                conn.executemany('''
+                    INSERT INTO processed_tickers 
+                    (ticker, last_processed, status, data_file, metadata_file, error, data_hash)
+                    VALUES (?, ?, 'success', NULL, NULL, NULL, NULL)
+                ''', [(t, v) for t, v in ticker_stats_dict.items()])
+
+                conn.commit()
+                self.logger.info(f"Resynced ticker cache with {len(ticker_stats_dict)} tickers.")
+            except Exception as e:
+                conn.rollback()
+                self.logger.error(f"Error during resync_ticker_cache: {e}")
+                raise
 
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
