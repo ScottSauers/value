@@ -28,6 +28,7 @@ class CacheManager:
         self._lock = threading.Lock()
         self._init_db()
         self._check_schema()
+        self.resync_ticker_cache()
 
     def _init_db(self):
         """Initialize SQLite database with necessary tables."""
