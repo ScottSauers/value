@@ -273,7 +273,7 @@ class SECDataExtractor:
     def rate_limited_get(self, tag: str, ticker: str, taxonomy: str, units: str) -> pd.DataFrame:
         """
         Wrapper for the finagg.sec.api.company_concept.get method with rate limiting.
-        Only implements backoff for rate limits, immediately returns empty DataFrame for 404s.
+        Implements backoff for rate limits and handles 404s by returning 'N/A'.
         """
         while True:
             with SECDataExtractor._rate_limit_lock:
@@ -287,7 +287,7 @@ class SECDataExtractor:
                     # Record the current timestamp and proceed
                     SECDataExtractor._request_timestamps.append(current_time)
                     break
-    
+
         try:
             response = finagg.sec.api.company_concept.get(
                 tag,
@@ -300,8 +300,13 @@ class SECDataExtractor:
             error_str = str(e)
             if "404" in error_str:
                 self.logger.error(f"404 error for {tag} and {ticker}: {e}")
-                return pd.DataFrame()  # Return empty DataFrame for 404s
+                # Create a DataFrame with 'N/A' for the concept
+                return pd.DataFrame({
+                    'filing_date': [datetime.now().strftime('%Y-%m-%d')],
+                    tag: ['N/A']
+                })
             elif "429" in error_str or "Too Many Requests" in error_str:
+                self.logger.warning(f"Rate limit hit for {ticker} when fetching {tag}: {e}")
                 raise  # Let process_ticker_batch handle rate limit retry
             else:
                 self.logger.error(f"Error during API call for {tag} and {ticker}: {e}")
