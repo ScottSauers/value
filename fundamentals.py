@@ -23,33 +23,53 @@ class SECDataExtractor:
     """Extracts raw SEC fundamental data with granular caching."""
     
     def _init_granular_cache(self):
-        """Initialize SQLite database with granular caching tables."""
+        """Initialize SQLite database with granular caching tables and improved schema."""
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
-            # Table for storing individual concept data points
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS concept_cache (
-                    ticker TEXT,
-                    concept_tag TEXT,
-                    filing_date TEXT,
-                    concept_value REAL,
-                    taxonomy TEXT,
-                    units TEXT,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (ticker, concept_tag, filing_date)
-                )
-            ''')
-            
-            # Table for tracking concept fetch status
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS concept_status (
-                    ticker TEXT,
-                    concept_tag TEXT,
-                    last_attempt TIMESTAMP,
-                    status TEXT,
-                    error TEXT,
-                    PRIMARY KEY (ticker, concept_tag)
-                )
-            ''')
+            try:
+                conn.execute('BEGIN IMMEDIATE')
+                
+                # Table for storing individual concept data points with fetch status
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS concept_cache (
+                        ticker TEXT,
+                        concept_tag TEXT,
+                        filing_date TEXT,
+                        concept_value REAL,
+                        taxonomy TEXT,
+                        units TEXT,
+                        fetch_status TEXT DEFAULT 'unknown',
+                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (ticker, concept_tag, filing_date)
+                    )
+                ''')
+                
+                # Table for tracking concept fetch status with more detail
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS concept_status (
+                        ticker TEXT,
+                        concept_tag TEXT,
+                        last_attempt TIMESTAMP,
+                        status TEXT,
+                        error TEXT,
+                        retry_count INTEGER DEFAULT 0,
+                        PRIMARY KEY (ticker, concept_tag)
+                    )
+                ''')
+                
+                # Create indices for better performance
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_concept_cache_ticker 
+                    ON concept_cache(ticker)
+                ''')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated 
+                    ON concept_cache(last_updated)
+                ''')
+                
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise
     
     # Comprehensive list of SEC concepts to collect
     SEC_CONCEPTS = [
@@ -196,42 +216,50 @@ class SECDataExtractor:
                 self.logger.debug(f"Cache miss for {ticker} {concept.tag}: {str(e)}")
         return None
 
-
+    
     def cache_concept_data(self, ticker: str, concept: SECConcept, data: pd.DataFrame):
-        """Cache the data for a specific concept."""
-        if data is None or data.empty:
-            return
-    
+        """Cache the data for a specific concept with explicit missing data handling."""
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
-            # Prepare data for caching
-            cache_df = data.copy()
-            if concept.tag in cache_df.columns:
+            try:
+                conn.execute('BEGIN IMMEDIATE')
+                
+                # Handle empty or missing data case
+                if data is None or data.empty:
+                    conn.execute('''
+                        INSERT OR REPLACE INTO concept_cache
+                        (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
+                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'not_reported', datetime('now'))
+                    ''', (ticker, concept.tag, concept.taxonomy, concept.units))
+                    conn.commit()
+                    return
+                
+                # Prepare data for caching
+                cache_df = data.copy()
+                if concept.tag not in cache_df.columns:
+                    return
+    
                 cache_df = cache_df.rename(columns={concept.tag: 'concept_value'})
-            else:
-                return  # Skip if the concept column isn't present
-            
-            cache_df['ticker'] = ticker
-            cache_df['concept_tag'] = concept.tag
-            cache_df['taxonomy'] = concept.taxonomy
-            cache_df['units'] = concept.units
-            cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                cache_df['ticker'] = ticker
+                cache_df['concept_tag'] = concept.tag
+                cache_df['taxonomy'] = concept.taxonomy
+                cache_df['units'] = concept.units
+                cache_df['fetch_status'] = 'success'
+                cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-            # Delete existing data for this ticker and concept
-            conn.execute('''
-                DELETE FROM concept_cache
-                WHERE ticker = ? AND concept_tag = ?
-            ''', (ticker, concept.tag))
+                # Delete existing data
+                conn.execute('''
+                    DELETE FROM concept_cache
+                    WHERE ticker = ? AND concept_tag = ?
+                ''', (ticker, concept.tag))
     
-            # Insert new data
-            cache_df.to_sql('concept_cache', conn, if_exists='append',
-                           index=False, method='multi')
-    
-            # Update status
-            conn.execute('''
-                INSERT OR REPLACE INTO concept_status
-                (ticker, concept_tag, last_attempt, status)
-                VALUES (?, ?, datetime('now'), 'success')
-            ''', (ticker, concept.tag))
+                # Insert new data
+                cache_df.to_sql('concept_cache', conn, if_exists='append',
+                               index=False, method='multi')
+                
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise
 
     def cache_concept_error(self, ticker: str, concept: SECConcept, error: str):
         """Cache error status for a concept."""
