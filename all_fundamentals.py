@@ -156,21 +156,27 @@ class CacheManager:
                 has_timestamp = cursor.fetchone()[0] > 0
     
                 if not has_timestamp:
-                    # First add the column without default
                     conn.execute('''
                         ALTER TABLE concept_cache
                         ADD COLUMN last_updated TIMESTAMP
                     ''')
-                    # Then update all existing rows with current timestamp
                     conn.execute('''
                         UPDATE concept_cache 
                         SET last_updated = datetime('now')
                         WHERE last_updated IS NULL
                     ''')
-                    # Then add an index for performance
+    
+                # Add fetch_status if it doesn't exist
+                cursor = conn.execute('''
+                    SELECT COUNT(*) FROM pragma_table_info('concept_cache')
+                    WHERE name = 'fetch_status'
+                ''')
+                has_fetch_status = cursor.fetchone()[0] > 0
+    
+                if not has_fetch_status:
                     conn.execute('''
-                        CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated 
-                        ON concept_cache(last_updated)
+                        ALTER TABLE concept_cache
+                        ADD COLUMN fetch_status TEXT DEFAULT 'unknown'
                     ''')
 
 
