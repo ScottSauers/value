@@ -56,24 +56,42 @@ class CacheManager:
             ''')
 
     def resync_ticker_cache(self):
-        """Rebuild cache from actual TSV files saved in last day"""
-        data_dir = self.cache_dir.parent
-        # Find all SEC data files modified in last day
-        cmd = f"find {data_dir} -name '*sec_data_*.tsv' -type f -mtime -1"
-        import subprocess
-        completed_files = subprocess.check_output(cmd, shell=True).decode().splitlines()
+        """Completely rebuild ticker_cache.db from both granular data and files"""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as gconn:
+            # Get completion from granular cache
+            cursor = gconn.execute('''
+                SELECT ticker, COUNT(DISTINCT concept_tag) as concept_count,
+                       MAX(last_updated) as last_update
+                FROM concept_cache 
+                WHERE concept_value IS NOT NULL
+                GROUP BY ticker
+                HAVING concept_count > 5  -- Consider "complete" if has multiple concepts
+            ''')
+            ticker_stats = cursor.fetchall()
+            ticker_stats_dict = {t[0]: t[2] for t in ticker_stats}
+    
+            # Also check saved files
+            data_dir = Path(self.cache_dir).parent.parent  # Go up to data/
+            cmd = f"find {data_dir} -name '*sec_data_*.tsv' -type f -mtime -1"
+            import subprocess
+            completed_files = subprocess.check_output(cmd, shell=True).decode().splitlines()
+            
+            # Add file-based completions
+            for file_path in completed_files:
+                ticker = os.path.basename(file_path).split('_')[0]
+                if ticker not in ticker_stats_dict:
+                    # Use file timestamp
+                    timestamp = datetime.fromtimestamp(os.path.getmtime(file_path))
+                    ticker_stats_dict[ticker] = timestamp.strftime('%Y-%m-%d %H:%M:%S')
         
+        # Write all completions to ticker_cache.db
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute('DELETE FROM processed_tickers')
-            # For each file found
-            for file_path in completed_files:
-                ticker = os.path.basename(file_path).split('_')[0]  # Get ticker from filename
-                conn.execute('''
-                    INSERT OR REPLACE INTO processed_tickers 
-                    (ticker, last_processed, status, data_file, metadata_file)
-                    VALUES (?, datetime('now'), 'success', ?, ?)
-                ''', (ticker, file_path, file_path.replace('.tsv', '.json')))
-
+            conn.executemany('''
+                INSERT INTO processed_tickers 
+                (ticker, last_processed, status, error)
+                VALUES (?, ?, 'success', NULL)
+            ''', [(t, v) for t, v in ticker_stats_dict.items()])
 
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
