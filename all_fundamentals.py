@@ -56,25 +56,26 @@ class CacheManager:
             ''')
 
     def resync_ticker_cache(self):
+        """Completely rebuild ticker_cache.db from granular data"""
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as gconn:
-            # Get all successfully processed tickers from granular
+            # Get fuller picture of ticker completion
             cursor = gconn.execute('''
-                SELECT DISTINCT ticker FROM concept_cache 
+                SELECT ticker, COUNT(DISTINCT concept_tag) as concept_count,
+                       MAX(last_updated) as last_update
+                FROM concept_cache 
                 WHERE concept_value IS NOT NULL
+                GROUP BY ticker
+                HAVING concept_count > 5  -- Consider "complete" if has multiple concepts
             ''')
-            successful_tickers = [row[0] for row in cursor.fetchall()]
+            ticker_stats = cursor.fetchall()
         
         with sqlite3.connect(str(self.db_path)) as conn:
-            # Clear existing records
             conn.execute('DELETE FROM processed_tickers')
-            
-            # Add successful records
-            for ticker in successful_tickers:
-                conn.execute('''
-                    INSERT INTO processed_tickers 
-                    (ticker, last_processed, status)
-                    VALUES (?, datetime('now'), 'success')
-                ''', (ticker,))
+            conn.executemany('''
+                INSERT INTO processed_tickers 
+                (ticker, last_processed, status, error)
+                VALUES (?, ?, 'success', NULL)
+            ''', [(t[0], t[2]) for t in ticker_stats])
 
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
