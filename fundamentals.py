@@ -11,7 +11,7 @@ import threading
 import sqlite3
 import time
 import hashlib
-
+import gc
 
 @dataclass
 class SECConcept:
