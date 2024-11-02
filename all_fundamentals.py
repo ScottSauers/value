@@ -61,8 +61,19 @@ class CacheManager:
     def resync_ticker_cache(self):
         """Rebuild ticker_cache.db by identifying tickers with .tsv files modified in the last 24 hours."""
         ticker_stats_dict = {}
-
-        # Fetch tickers with substantial data from granular_cache.db
+    
+        # First, get existing processed tickers from ticker_cache.db
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.execute('''
+                SELECT ticker, last_processed, status
+                FROM processed_tickers
+                WHERE last_processed > datetime('now', '-7 days')
+                AND status = 'success'
+            ''')
+            existing_tickers = {row[0]: row[1] for row in cursor.fetchall()}
+            ticker_stats_dict.update(existing_tickers)
+    
+        # Then get tickers from granular_cache.db
         granular_cache_path = self.cache_dir / 'granular_cache.db'
         if granular_cache_path.exists():
             with sqlite3.connect(str(granular_cache_path)) as gconn:
@@ -71,45 +82,43 @@ class CacheManager:
                            MAX(last_updated) as last_update
                     FROM concept_cache 
                     WHERE concept_value IS NOT NULL
+                    AND last_updated > datetime('now', '-7 days')
                     GROUP BY ticker
-                    HAVING concept_count > 50  -- Consider "complete" if has multiple concepts
+                    HAVING concept_count > 50
                 ''')
                 ticker_stats = cursor.fetchall()
-                ticker_stats_dict = {t[0]: t[2] for t in ticker_stats}
-
-        # Now scan the data directory for .tsv files modified in the last 24 hours
-        data_dir = self.cache_dir.parent.parent  # Adjust this path as needed
-        cutoff_time = datetime.now() - timedelta(days=1)
+                for ticker, _, last_update in ticker_stats:
+                    if ticker not in ticker_stats_dict:
+                        ticker_stats_dict[ticker] = last_update
+    
+        # Now scan for recent .tsv files
+        data_dir = self.cache_dir.parent.parent
         recent_files = list(data_dir.glob('**/*sec_data_*.tsv'))
-        recent_tickers = {}
-
+        
         for file_path in recent_files:
-            modification_time = datetime.fromtimestamp(file_path.stat().st_mtime)
-            if modification_time >= cutoff_time:
-                # Extract ticker from filename, assuming the format "TICKER_sec_data_TIMESTAMP.tsv"
-                filename = file_path.stem  # e.g., "AAPL_sec_data_20231030_123456"
-                ticker = filename.split('_')[0]
-                recent_tickers[ticker] = modification_time.strftime('%Y-%m-%d %H:%M:%S')
-
-        # Merge tickers from granular_cache.db and recent .tsv files
-        for ticker, mod_time in recent_tickers.items():
-            ticker_stats_dict[ticker] = mod_time  # Recent .tsv files take precedence
-
-        # Write all completions to ticker_cache.db
+            try:
+                modification_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+                if modification_time >= (datetime.now() - timedelta(days=7)):
+                    ticker = file_path.stem.split('_')[0]
+                    mod_time_str = modification_time.strftime('%Y-%m-%d %H:%M:%S')
+                    ticker_stats_dict[ticker] = mod_time_str
+            except Exception as e:
+                self.logger.warning(f"Error processing file {file_path}: {e}")
+    
+        # Write all to ticker_cache.db
         with sqlite3.connect(str(self.db_path)) as conn:
-            # Start a transaction for atomicity
             conn.execute('BEGIN IMMEDIATE')
             try:
                 # Clear existing processed tickers
                 conn.execute('DELETE FROM processed_tickers')
-
+    
                 # Insert updated processed tickers
                 conn.executemany('''
                     INSERT INTO processed_tickers 
                     (ticker, last_processed, status, data_file, metadata_file, error, data_hash)
                     VALUES (?, ?, 'success', NULL, NULL, NULL, NULL)
                 ''', [(t, v) for t, v in ticker_stats_dict.items()])
-
+    
                 conn.commit()
                 self.logger.info(f"Resynced ticker cache with {len(ticker_stats_dict)} tickers.")
             except Exception as e:
@@ -117,6 +126,14 @@ class CacheManager:
                 self.logger.error(f"Error during resync_ticker_cache: {e}")
                 raise
 
+    def cleanup_old_entries(self):
+        """Remove entries older than 7 days."""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute('''
+                DELETE FROM processed_tickers 
+                WHERE last_processed < datetime('now', '-7 days')
+            ''')
+    
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent."""
         with self._lock:
@@ -364,29 +381,28 @@ def calculate_data_hash(data_file: Path) -> str:
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
-def process_ticker_batch(
-    tickers: List[str],
-    output_dir: Path,
-    cache_manager: CacheManager,
-    progress_tracker: ProgressTracker
-) -> List[dict]:
+def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: CacheManager, progress_tracker: ProgressTracker) -> List[dict]:
     """Process a batch of tickers with memory management."""
     try:
         results = []
-        extractor = SECDataExtractor(str(output_dir))
+        extractor = None  # Don't create until needed
         completed_in_batch = 0
-
-        # Rate limit retry parameters
-        MAX_RETRIES = 3
-        BASE_RETRY_DELAY = 1
 
         for ticker in tickers:
             try:
-                # Monitor memory
+                # Create extractor only when needed
+                if extractor is None:
+                    extractor = SECDataExtractor(str(output_dir))
+
+                # Aggressive memory monitoring
                 memory_percent = psutil.Process().memory_percent()
-                if memory_percent > 80:
+                if memory_percent > 70:  # Lower threshold
                     logging.warning(f"High memory usage in batch: {memory_percent:.1f}%")
                     gc.collect()
+                    if extractor:
+                        del extractor
+                        extractor = None
+                        gc.collect()
 
                 # Check cache first
                 cached_result = cache_manager.get_cached_result(ticker)
@@ -450,7 +466,8 @@ def process_ticker_batch(
 
         return results
     finally:
-        # Cleanup
+        if extractor:
+            del extractor
         gc.collect()
 
 def parallel_process_tickers(
@@ -470,6 +487,7 @@ def parallel_process_tickers(
     setup_environment()
     logger = setup_logging(output_path)
     cache_manager = CacheManager(output_path / 'cache')
+    cache_manager.cleanup_old_entries()
     progress_tracker = ProgressTracker()
     
     # Generate batch ID
