@@ -333,6 +333,7 @@ class SECDataExtractor:
                 })
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
+        """Retrieve SEC fundamental data with granular caching and merge progress tracking."""
         all_data = []
         
         for concept in self.SEC_CONCEPTS:
@@ -341,6 +342,7 @@ class SECDataExtractor:
                 cached_data = self.get_cached_concept(ticker, concept)
                 if cached_data is not None and not cached_data.empty:
                     self.logger.info(f"Using cached data for {ticker} {concept.tag}")
+                    self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
                     all_data.append(cached_data)
                     continue
                 
@@ -370,17 +372,24 @@ class SECDataExtractor:
                 self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
                 self.cache_concept_error(ticker, concept, str(e))
         
+        self.logger.info(f"Beginning merge of {len(all_data)} dataframes for {ticker}")
+        
         if not all_data:
             self.logger.warning(f"No SEC data found for {ticker}")
             return pd.DataFrame()
         
-        # Merge all available data
+        # Merge all available data with progress tracking
         merged_df = all_data[0]
-        for df in all_data[1:]:
+        self.logger.info(f"Initial dataframe shape: {merged_df.shape}")
+        
+        for i, df in enumerate(all_data[1:]):
+            self.logger.info(f"Merging dataframe {i+1} of {len(all_data)-1} for {ticker}")
             merged_df = pd.merge(merged_df, df, on='filing_date', how='outer')
+            self.logger.info(f"Shape after merge {i+1}: {merged_df.shape}")
         
         # Sort by filing date
         merged_df = merged_df.sort_values('filing_date', ascending=False)
+        self.logger.info(f"Final merged shape for {ticker}: {merged_df.shape}")
         
         return merged_df
 
