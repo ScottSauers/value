@@ -329,6 +329,7 @@ class SECDataExtractor:
                 return pd.DataFrame({
                     'end': [datetime.now().strftime('%Y-%m-%d')],
                     'value': ['N/A'],
+                    'filed': [datetime.now().strftime('%Y-%m-%d')]
                 })
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
