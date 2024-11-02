@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 import threading
 import sqlite3
 import time
+import hashlib
+
 
 @dataclass
 class SECConcept:
