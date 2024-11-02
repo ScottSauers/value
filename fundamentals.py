@@ -355,6 +355,11 @@ class SECDataExtractor:
                         self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
                         cached_data.reset_index(drop=True, inplace=True)
                         result_df = pd.merge(result_df, cached_data, on='filing_date', how='left')
+                        self.logger.info(f"DataFrame size after merge: {result_df.shape}")
+                        
+                        # Calculate memory usage
+                        memory_usage = result_df.memory_usage(deep=True).sum() / 1024 / 1024  # MB
+                        self.logger.info(f"Memory usage: {memory_usage:.2f} MB")
                         continue
     
                     df = self.rate_limited_get(
@@ -371,18 +376,20 @@ class SECDataExtractor:
                             df = df[['filing_date', concept.tag]]
                             result_df = pd.merge(result_df, df, on='filing_date', how='left')
                             self.cache_concept_data(ticker, concept, df)
+                            self.logger.info(f"DataFrame size after merge: {result_df.shape}")
+                            memory_usage = result_df.memory_usage(deep=True).sum() / 1024 / 1024
+                            self.logger.info(f"Memory usage: {memory_usage:.2f} MB")
                         else:
                             self.logger.info(f"No data available for {concept.tag} and {ticker}")
                             self.cache_concept_data(ticker, concept, df)
-                    
+                        
                 except Exception as e:
                     self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
                     self.cache_concept_error(ticker, concept, str(e))
-                
-                gc.collect()
             
-            return optimize_df(result_df)
+            return result_df
         
+        # Get all unique dates first
         all_dates = set()
         for concept in self.SEC_CONCEPTS:
             try:
@@ -396,9 +403,12 @@ class SECDataExtractor:
             self.logger.warning(f"No SEC data found for {ticker}")
             return pd.DataFrame()
         
+        # Create base dataframe
         base_df = pd.DataFrame({'filing_date': sorted(list(all_dates))})
         base_df = optimize_df(base_df)
+        self.logger.info(f"Initial base DataFrame size: {base_df.shape}")
         
+        # Process in smaller chunks
         concept_batches = [
             self.SEC_CONCEPTS[i:i + CHUNK_SIZE] 
             for i in range(0, len(self.SEC_CONCEPTS), CHUNK_SIZE)
@@ -411,7 +421,8 @@ class SECDataExtractor:
             gc.collect()
         
         result_df = result_df.sort_values('filing_date', ascending=False)
-        self.logger.info(f"Final merged shape for {ticker}: {result_df.shape}")
+        final_memory = result_df.memory_usage(deep=True).sum() / 1024 / 1024
+        self.logger.info(f"Final DataFrame shape: {result_df.shape}, Memory usage: {final_memory:.2f} MB")
         
         return result_df
 
