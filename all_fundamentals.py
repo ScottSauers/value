@@ -316,13 +316,17 @@ class ProgressTracker:
     def finish(self):
         """Complete progress tracking."""
         try:
-            self.progress.stop()
+            if self.progress:
+                self.progress.stop()
+                self.progress = None
         except:
             pass  # Don't hang if progress bar is already stopped
-        
-        # Clear references
-        self.total_task = None
-        self.current_batch_task = None
+        finally:
+            # Aggressively clear all references
+            self.total_task = None
+            self.current_batch_task = None
+            self.console = None
+
 
 def setup_environment():
     """Set up environment variables and configurations."""
@@ -589,6 +593,8 @@ def parallel_process_tickers(
     
     # Complete progress tracking
     progress_tracker.finish()
+    progress_tracker.progress = None
+    gc.collect()
     
     # Combine all results
     final_results_df = pd.DataFrame(results)
