@@ -4,7 +4,7 @@ import pandas as pd
 from pathlib import Path
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Tuple
 import finagg
 from dotenv import load_dotenv
