@@ -18,6 +18,8 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 from rich.logging import RichHandler
 import random
+import gc
+import psutil
 import threading
 
 class CacheManager:
@@ -357,75 +359,88 @@ def process_ticker_batch(
     cache_manager: CacheManager,
     progress_tracker: ProgressTracker
 ) -> List[dict]:
-    results = []
-    extractor = SECDataExtractor(str(output_dir))
-    completed_in_batch = 0
+    """Process a batch of tickers with memory management."""
+    try:
+        results = []
+        extractor = SECDataExtractor(str(output_dir))
+        completed_in_batch = 0
 
-    # Rate limit retry parameters
-    MAX_RETRIES = 3
-    BASE_RETRY_DELAY = 1
+        # Rate limit retry parameters
+        MAX_RETRIES = 3
+        BASE_RETRY_DELAY = 1
 
-    for ticker in tickers:
-        try:
-            # Check cache first
-            cached_result = cache_manager.get_cached_result(ticker)
-            if cached_result and cached_result['status'] == 'success':
-                results.append(cached_result)
-                completed_in_batch += 1
-                progress_tracker.update_progress(None, completed_in_batch)
-                continue
+        for ticker in tickers:
+            try:
+                # Monitor memory
+                memory_percent = psutil.Process().memory_percent()
+                if memory_percent > 80:
+                    logging.warning(f"High memory usage in batch: {memory_percent:.1f}%")
+                    gc.collect()
 
-            # Process ticker with retry only for rate limits
-            for attempt in range(MAX_RETRIES):
-                try:
-                    data_file, metadata_file = extractor.process_ticker(ticker)
-                    
-                    if data_file == "N/A" and metadata_file == "N/A":
-                        # All concepts returned 'N/A'; mark as skipped
-                        result = {
-                            'ticker': ticker,
-                            'status': 'N/A',
-                            'data_file': "N/A",
-                            'metadata_file': "N/A"
-                        }
-                    else:
-                        result = {
-                            'ticker': ticker,
-                            'status': 'success',
-                            'data_file': str(data_file),
-                            'metadata_file': str(metadata_file)
-                        }
-                    
-                    cache_manager.cache_result(ticker, result)
-                    results.append(result)
-                    break
+                # Check cache first
+                cached_result = cache_manager.get_cached_result(ticker)
+                if cached_result and cached_result['status'] == 'success':
+                    results.append(cached_result)
+                    completed_in_batch += 1
+                    progress_tracker.update_progress(None, completed_in_batch)
+                    continue
 
-                except Exception as e:
-                    if "429" in str(e) or "Too Many Requests" in str(e):
-                        if attempt < MAX_RETRIES - 1:
-                            delay = BASE_RETRY_DELAY * (2 ** attempt)
-                            logging.warning(
-                                f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
-                                f"Waiting {delay}s"
-                            )
-                            time.sleep(delay)
-                            continue
-                    raise
+                # Process ticker with retry only for rate limits
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        data_file, metadata_file = extractor.process_ticker(ticker)
+                        
+                        if data_file == "N/A" and metadata_file == "N/A":
+                            result = {
+                                'ticker': ticker,
+                                'status': 'N/A',
+                                'data_file': "N/A",
+                                'metadata_file': "N/A"
+                            }
+                        else:
+                            result = {
+                                'ticker': ticker,
+                                'status': 'success',
+                                'data_file': str(data_file),
+                                'metadata_file': str(metadata_file)
+                            }
+                        
+                        cache_manager.cache_result(ticker, result)
+                        results.append(result)
+                        break
 
-        except Exception as e:
-            error_result = {
-                'ticker': ticker,
-                'status': 'failed',
-                'error': str(e)
-            }
-            cache_manager.cache_result(ticker, error_result)
-            results.append(error_result)
-            logging.error(f"Failed to process {ticker}: {str(e)}")
+                    except Exception as e:
+                        if "429" in str(e) or "Too Many Requests" in str(e):
+                            if attempt < MAX_RETRIES - 1:
+                                delay = BASE_RETRY_DELAY * (2 ** attempt)
+                                logging.warning(
+                                    f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
+                                    f"Waiting {delay}s"
+                                )
+                                time.sleep(delay)
+                                continue
+                        raise
 
-        completed_in_batch += 1
-        progress_tracker.update_progress(None, completed_in_batch)
+            except Exception as e:
+                error_result = {
+                    'ticker': ticker,
+                    'status': 'failed',
+                    'error': str(e)
+                }
+                cache_manager.cache_result(ticker, error_result)
+                results.append(error_result)
+                logging.error(f"Failed to process {ticker}: {str(e)}")
 
-    return results
+            completed_in_batch += 1
+            progress_tracker.update_progress(None, completed_in_batch)
+            
+            # Clear any temporary objects
+            gc.collect()
+
+        return results
+    finally:
+        # Cleanup
+        gc.collect()
 
 def parallel_process_tickers(
     input_file: str,
@@ -458,10 +473,18 @@ def parallel_process_tickers(
         logger.error(f"Failed to read input file: {str(e)}")
         raise
     
+    # Determine optimal batch size based on available memory
+    available_memory = psutil.virtual_memory().available
+    estimated_memory_per_ticker = 1024 * 1024  # 1MB estimate
+    optimal_batch_size = min(
+        batch_size,
+        max(10, int(available_memory / (estimated_memory_per_ticker * 2)))
+    )
+    
     # Split tickers into batches
     ticker_batches = [
-        tickers[i:i + batch_size] 
-        for i in range(0, len(tickers), batch_size)
+        tickers[i:i + optimal_batch_size] 
+        for i in range(0, len(tickers), optimal_batch_size)
     ]
     
     # Get count of already processed tickers
@@ -478,72 +501,91 @@ def parallel_process_tickers(
     else:
         completed_total = 0
 
-    # Process batches in parallel
+    # Process batches in parallel with memory management
     start_time = datetime.now()
     results = []
+    MAX_CONCURRENT_BATCHES = min(4, max_workers if max_workers else 4)
+    active_futures = set()
+    
+    def save_batch_results(batch_results, batch_num):
+        batch_df = pd.DataFrame(batch_results)
+        batch_file = output_path / f'batch_results_{batch_id}_part{batch_num}.csv'
+        batch_df.to_csv(batch_file, index=False)
+        return []
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit batch processing jobs
-        future_to_batch = {
-            executor.submit(
+        for batch_num, batch in enumerate(ticker_batches):
+            # Wait if too many active futures
+            while len(active_futures) >= MAX_CONCURRENT_BATCHES:
+                done, active_futures = concurrent.futures.wait(
+                    active_futures,
+                    return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for future in done:
+                    try:
+                        batch_results = future.result()
+                        results.extend(batch_results)
+                        completed_total += len(batch_results)
+                        progress_tracker.update_progress(completed_total)
+                        
+                        # Save and clear results periodically
+                        if len(results) > 1000:
+                            results = save_batch_results(results, batch_num)
+                    except Exception as e:
+                        logger.error(f"Batch processing error: {str(e)}")
+                
+                # Force garbage collection
+                gc.collect()
+            
+            # Monitor memory usage
+            memory_percent = psutil.Process().memory_percent()
+            if memory_percent > 80:
+                logger.warning(f"High memory usage: {memory_percent:.1f}%")
+                # Wait for all current batches to complete
+                concurrent.futures.wait(active_futures)
+                results = save_batch_results(results, batch_num)
+                gc.collect()
+            
+            # Submit new batch
+            future = executor.submit(
                 process_ticker_batch,
                 batch,
                 output_path,
                 cache_manager,
                 progress_tracker
-            ): batch 
-            for batch in ticker_batches
-        }
+            )
+            active_futures.add(future)
         
-        # Collect results as they complete
-        for i, future in enumerate(concurrent.futures.as_completed(future_to_batch)):
-            batch = future_to_batch[future]
+        # Wait for remaining futures
+        for future in concurrent.futures.as_completed(active_futures):
             try:
                 batch_results = future.result()
                 results.extend(batch_results)
-                completed_total += len(batch)
+                completed_total += len(batch_results)
                 progress_tracker.update_progress(completed_total)
-                
-                # Calculate and display completion percentage
-                completion_percentage = (completed_total / len(tickers)) * 100
-                logger.info(
-                    f"📊 Completed batch {i+1}/{len(ticker_batches)} "
-                    f"({completed_total} of {len(tickers)} tickers processed, {completion_percentage:.1f}% overall)"
-                )
-                
             except Exception as e:
-                logger.error(f"Exception processing batch: {str(e)}")
-                for ticker in batch:
-                    error_result = {
-                        'ticker': ticker,
-                        'status': 'failed',
-                        'error': str(e)
-                    }
-                    cache_manager.cache_result(ticker, error_result)
-                    results.append(error_result)
-                completed_total += len(batch)
-                progress_tracker.update_progress(completed_total)
+                logger.error(f"Batch processing error: {str(e)}")
     
     # Complete progress tracking
     progress_tracker.finish()
     
-    # Create summary DataFrame
-    results_df = pd.DataFrame(results)
+    # Combine all results
+    final_results_df = pd.DataFrame(results)
     
     # Save summary
     summary_file = output_path / f'processing_summary_{batch_id}.csv'
-    results_df.to_csv(summary_file, index=False)
+    final_results_df.to_csv(summary_file, index=False)
     
     # Calculate final statistics
     end_time = datetime.now()
-    success_count = len(results_df[results_df['status'] == 'success'])
-    fail_count = len(results_df[results_df['status'] == 'failed'])
+    success_count = len(final_results_df[final_results_df['status'] == 'success'])
+    fail_count = len(final_results_df[final_results_df['status'] == 'failed'])
     
     # Save batch statistics
     batch_stats = {
         'start_time': start_time.isoformat(),
         'end_time': end_time.isoformat(),
-        'total_tickers': len(results_df),
+        'total_tickers': len(final_results_df),
         'successful': success_count,
         'failed': fail_count
     }
@@ -551,13 +593,13 @@ def parallel_process_tickers(
     
     # Print final summary
     logger.info("\n📋 Processing Summary:")
-    logger.info(f"Total tickers processed: {len(results_df)}")
+    logger.info(f"Total tickers processed: {len(final_results_df)}")
     logger.info(f"✅ Successful: {success_count}")
     logger.info(f"❌ Failed: {fail_count}")
     logger.info(f"⏱️ Total time: {end_time - start_time}")
     logger.info(f"📁 Summary saved to: {summary_file}")
     
-    return results_df
+    return final_results_df
 
 def main():
     """Main execution function with configuration."""
@@ -566,7 +608,7 @@ def main():
     OUTPUT_DIR = './data/fundamentals'
     MAX_WORKERS = 8
     TICKER_COLUMN = 'ticker'
-    BATCH_SIZE = 25
+    BATCH_SIZE = 16
     
     try:
         console = Console()
