@@ -381,6 +381,9 @@ def calculate_data_hash(data_file: Path) -> str:
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
+MAX_RETRIES = 3
+BASE_RETRY_DELAY = 1
+
 def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: CacheManager, progress_tracker: ProgressTracker) -> List[dict]:
     """Process a batch of tickers with memory management."""
     try:
