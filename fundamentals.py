@@ -333,7 +333,6 @@ class SECDataExtractor:
                 })
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
-        """Retrieve SEC fundamental data with granular caching."""
         all_data = []
         
         for concept in self.SEC_CONCEPTS:
@@ -353,23 +352,22 @@ class SECDataExtractor:
                     units=concept.units
                 )
                 
-                if not df.empty:
-                    # Process the data
-                    df = finagg.sec.api.filter_original_filings(df)
-                    df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
-                    df = df[['filing_date', concept.tag]]
-                    
-                    # Cache the new data
-                    self.cache_concept_data(ticker, concept, df)
-                    
-                    all_data.append(df)
-                    self.logger.info(f"Successfully retrieved and cached {concept.tag} data for {ticker}")
-                else:
-                    # Cache 'N/A' result
-                    self.cache_concept_data(ticker, concept, pd.DataFrame())
-                    
+                if df is not None and not df.empty:
+                    if 'value' in df.columns and df['value'].iloc[0] != 'N/A':
+                        # Process the data only if it's not N/A
+                        df = finagg.sec.api.filter_original_filings(df)
+                        df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
+                        df = df[['filing_date', concept.tag]]
+                        all_data.append(df)
+                        self.logger.info(f"Successfully retrieved {concept.tag} data for {ticker}")
+                    else:
+                        self.logger.info(f"No data available for {concept.tag} and {ticker}")
+                
+                # Cache the data (or N/A result)
+                self.cache_concept_data(ticker, concept, df)
+                
             except Exception as e:
-                self.logger.warning(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
+                self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
                 self.cache_concept_error(ticker, concept, str(e))
         
         if not all_data:
