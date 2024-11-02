@@ -385,93 +385,71 @@ MAX_RETRIES = 3
 BASE_RETRY_DELAY = 1
 
 def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: CacheManager, progress_tracker: ProgressTracker) -> List[dict]:
-    """Process a batch of tickers with memory management."""
-    try:
-        results = []
-        extractor = None  # Don't create until needed
-        completed_in_batch = 0
+   """Process a batch of tickers."""
+   results = []
+   completed_in_batch = 0
+   extractor = SECDataExtractor(str(output_dir))
 
-        for ticker in tickers:
-            try:
-                # Create extractor only when needed
-                if extractor is None:
-                    extractor = SECDataExtractor(str(output_dir))
+   for ticker in tickers:
+       try:
+           # Check cache first
+           cached_result = cache_manager.get_cached_result(ticker)
+           if cached_result and cached_result['status'] == 'success':
+               results.append(cached_result)
+               completed_in_batch += 1
+               progress_tracker.update_progress(None, completed_in_batch)
+               continue
 
-                # Aggressive memory monitoring
-                memory_percent = psutil.Process().memory_percent()
-                if memory_percent > 70:  # Lower threshold
-                    logging.warning(f"High memory usage in batch: {memory_percent:.1f}%")
-                    gc.collect()
-                    if extractor:
-                        del extractor
-                        extractor = None
-                        gc.collect()
+           # Process ticker with retry only for rate limits
+           for attempt in range(MAX_RETRIES):
+               try:
+                   data_file, metadata_file = extractor.process_ticker(ticker)
+                   
+                   if data_file == "N/A" and metadata_file == "N/A":
+                       result = {
+                           'ticker': ticker,
+                           'status': 'N/A',
+                           'data_file': "N/A",
+                           'metadata_file': "N/A"
+                       }
+                   else:
+                       result = {
+                           'ticker': ticker,
+                           'status': 'success',
+                           'data_file': str(data_file),
+                           'metadata_file': str(metadata_file)
+                       }
+                   
+                   cache_manager.cache_result(ticker, result)
+                   results.append(result)
+                   break
 
-                # Check cache first
-                cached_result = cache_manager.get_cached_result(ticker)
-                if cached_result and cached_result['status'] == 'success':
-                    results.append(cached_result)
-                    completed_in_batch += 1
-                    progress_tracker.update_progress(None, completed_in_batch)
-                    continue
+               except Exception as e:
+                   if "429" in str(e) or "Too Many Requests" in str(e):
+                       if attempt < MAX_RETRIES - 1:
+                           delay = BASE_RETRY_DELAY * (2 ** attempt)
+                           logging.warning(
+                               f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
+                               f"Waiting {delay}s"
+                           )
+                           time.sleep(delay)
+                           continue
+                   raise
 
-                # Process ticker with retry only for rate limits
-                for attempt in range(MAX_RETRIES):
-                    try:
-                        data_file, metadata_file = extractor.process_ticker(ticker)
-                        
-                        if data_file == "N/A" and metadata_file == "N/A":
-                            result = {
-                                'ticker': ticker,
-                                'status': 'N/A',
-                                'data_file': "N/A",
-                                'metadata_file': "N/A"
-                            }
-                        else:
-                            result = {
-                                'ticker': ticker,
-                                'status': 'success',
-                                'data_file': str(data_file),
-                                'metadata_file': str(metadata_file)
-                            }
-                        
-                        cache_manager.cache_result(ticker, result)
-                        results.append(result)
-                        break
+       except Exception as e:
+           error_result = {
+               'ticker': ticker,
+               'status': 'failed', 
+               'error': str(e)
+           }
+           cache_manager.cache_result(ticker, error_result)
+           results.append(error_result)
+           logging.error(f"Failed to process {ticker}: {str(e)}")
 
-                    except Exception as e:
-                        if "429" in str(e) or "Too Many Requests" in str(e):
-                            if attempt < MAX_RETRIES - 1:
-                                delay = BASE_RETRY_DELAY * (2 ** attempt)
-                                logging.warning(
-                                    f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
-                                    f"Waiting {delay}s"
-                                )
-                                time.sleep(delay)
-                                continue
-                        raise
+       completed_in_batch += 1
+       progress_tracker.update_progress(None, completed_in_batch)
 
-            except Exception as e:
-                error_result = {
-                    'ticker': ticker,
-                    'status': 'failed',
-                    'error': str(e)
-                }
-                cache_manager.cache_result(ticker, error_result)
-                results.append(error_result)
-                logging.error(f"Failed to process {ticker}: {str(e)}")
-
-            completed_in_batch += 1
-            progress_tracker.update_progress(None, completed_in_batch)
-            
-            # Clear any temporary objects
-            gc.collect()
-
-        return results
-    finally:
-        if extractor:
-            del extractor
-        gc.collect()
+   return results
 
 def parallel_process_tickers(
     input_file: str,
