@@ -315,7 +315,14 @@ class ProgressTracker:
 
     def finish(self):
         """Complete progress tracking."""
-        self.progress.stop()
+        try:
+            self.progress.stop()
+        except:
+            pass  # Don't hang if progress bar is already stopped
+        
+        # Clear references
+        self.total_task = None
+        self.current_batch_task = None
 
 def setup_environment():
     """Set up environment variables and configurations."""
@@ -556,15 +563,29 @@ def parallel_process_tickers(
             )
             active_futures.add(future)
         
-        # Wait for remaining futures
-        for future in concurrent.futures.as_completed(active_futures):
-            try:
-                batch_results = future.result()
-                results.extend(batch_results)
-                completed_total += len(batch_results)
-                progress_tracker.update_progress(completed_total)
-            except Exception as e:
-                logger.error(f"Batch processing error: {str(e)}")
+        # Wait for remaining futures with a timeout
+        remaining_futures = list(active_futures)
+        while remaining_futures:
+            done, remaining_futures = concurrent.futures.wait(
+                remaining_futures, 
+                timeout=10.0,  # 10 second timeout
+                return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            for future in done:
+                try:
+                    batch_results = future.result(timeout=5.0)  # 5 second timeout
+                    results.extend(batch_results)
+                    completed_total += len(batch_results)
+                    progress_tracker.update_progress(completed_total)
+                except concurrent.futures.TimeoutError:
+                    logger.error("Timeout waiting for batch results")
+                    # Cancel the future if possible
+                    future.cancel()
+                except Exception as e:
+                    logger.error(f"Batch processing error: {str(e)}")
+            
+            # Force cleanup
+            gc.collect()
     
     # Complete progress tracking
     progress_tracker.finish()
