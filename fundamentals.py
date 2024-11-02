@@ -331,7 +331,7 @@ class SECDataExtractor:
                     'value': ['N/A'],
                     'filed': [datetime.now().strftime('%Y-%m-%d')]
                 })
-
+    
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """Retrieve SEC fundamental data with granular caching and merge progress tracking."""
         all_data = []
@@ -343,9 +343,11 @@ class SECDataExtractor:
                 if cached_data is not None and not cached_data.empty:
                     self.logger.info(f"Using cached data for {ticker} {concept.tag}")
                     self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
+                    # Ensure index is not a date before appending
+                    cached_data.reset_index(drop=True, inplace=True)
                     all_data.append(cached_data)
                     continue
-                
+
                 # If not cached or cache expired, fetch from API
                 df = self.rate_limited_get(
                     tag=concept.tag,
@@ -372,19 +374,25 @@ class SECDataExtractor:
                 self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
                 self.cache_concept_error(ticker, concept, str(e))
         
-        self.logger.info(f"Beginning merge of {len(all_data)} dataframes for {ticker}")
+        self.logger.info(f"Beginning merge of {len(all_data)} dataframes for VIRX")
         
         if not all_data:
             self.logger.warning(f"No SEC data found for {ticker}")
             return pd.DataFrame()
         
-        # Merge all available data with progress tracking
-        merged_df = all_data[0]
-        self.logger.info(f"Initial dataframe shape: {merged_df.shape}")
+        # Get unique filing dates across all dataframes
+        all_dates = pd.concat([df['filing_date'] for df in all_data]).unique()
+        all_dates.sort()
         
-        for i, df in enumerate(all_data[1:]):
-            self.logger.info(f"Merging dataframe {i+1} of {len(all_data)-1} for {ticker}")
-            merged_df = pd.merge(merged_df, df, on='filing_date', how='outer')
+        # Create base dataframe with all dates
+        merged_df = pd.DataFrame({'filing_date': all_dates})
+        self.logger.info(f"Created base dataframe with {len(all_dates)} unique dates")
+        
+        # Merge each concept dataframe one by one using left merge
+        for i, df in enumerate(all_data):
+            concept_name = df.columns[1]  # Second column should be the concept name
+            self.logger.info(f"Merging concept {i+1} of {len(all_data)}: {concept_name}")
+            merged_df = pd.merge(merged_df, df, on='filing_date', how='left')
             self.logger.info(f"Shape after merge {i+1}: {merged_df.shape}")
         
         # Sort by filing date
