@@ -70,7 +70,7 @@ class CacheManager:
                     FROM concept_cache 
                     WHERE concept_value IS NOT NULL
                     GROUP BY ticker
-                    HAVING concept_count > 5  -- Consider "complete" if has multiple concepts
+                    HAVING concept_count > 50  -- Consider "complete" if has multiple concepts
                 ''')
                 ticker_stats = cursor.fetchall()
                 ticker_stats_dict = {t[0]: t[2] for t in ticker_stats}
