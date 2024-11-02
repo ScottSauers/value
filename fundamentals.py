@@ -325,18 +325,11 @@ class SECDataExtractor:
         except Exception as e:
             error_str = str(e)
             if "404" in error_str:
-                self.logger.error(f"404 error for {tag} and {ticker}: {e}")
-                # Create a DataFrame with 'N/A' for the concept
+                self.logger.info(f"No data found for {tag} and {ticker} (404)")
                 return pd.DataFrame({
-                    'filing_date': [datetime.now().strftime('%Y-%m-%d')],
-                    tag: ['N/A']
+                    'end': [datetime.now().strftime('%Y-%m-%d')],
+                    'value': ['N/A'],
                 })
-            elif "429" in error_str or "Too Many Requests" in error_str:
-                self.logger.warning(f"Rate limit hit for {ticker} when fetching {tag}: {e}")
-                raise  # Let process_ticker_batch handle rate limit retry
-            else:
-                self.logger.error(f"Error during API call for {tag} and {ticker}: {e}")
-                raise
 
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """Retrieve SEC fundamental data with granular caching."""
