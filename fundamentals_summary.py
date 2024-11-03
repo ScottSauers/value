@@ -121,12 +121,12 @@ class SECDataQuality:
                     unique_tsv_files.add(file.name[:6])
                 unique_tsv_count = len(unique_tsv_files)
                 
-                # Query cache for numerical values only
+                # Query cache for entries where concept_value is a valid number
                 cursor = conn.execute("""
                     SELECT COUNT(DISTINCT ticker) 
                     FROM concept_cache 
                     WHERE concept_tag = ? 
-                    AND concept_value GLOB '-?[0-9]*\\.?[0-9]*'
+                    AND concept_value REGEXP '^-?\\d+(\\.\\d+)?$'
                 """, (concept,))
                 numerical_cache_count = cursor.fetchone()[0]
     
