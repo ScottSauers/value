@@ -418,7 +418,7 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
                     continue
                 else:
                     # Insufficient concepts, proceed to fetch missing data
-                    self.logger.info(f"Ticker {ticker} has {concept_count} concepts. Proceeding to fetch missing data.")
+                    extractor.logger.info(f"Ticker {ticker} has {concept_count} concepts. Proceeding to fetch missing data.")
                     pass  # Continue to processing below
 
             # Process ticker with retry only for rate limits
