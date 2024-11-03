@@ -10,6 +10,7 @@ from rich.table import Table
 from typing import Dict, List, Tuple
 import warnings
 import sqlite3
+import csv
 
 warnings.filterwarnings('ignore')
 
@@ -109,36 +110,37 @@ class SECDataQuality:
             self.console.print(table)
 
     def verify_data_consistency(self):
-        """Verify data consistency across different storage formats, focusing only on numerical values."""
+        """Verify data consistency across different storage formats, only on numerical values."""
         with sqlite3.connect('data/fundamentals/cache/granular_cache.db') as conn:
             for concept in self.data['concept_summary'].keys():
                 if concept in ['ticker', 'filing_date', 'units', 'taxonomy']:
                     continue
     
-                # Count unique TSV files by grouping those with the same first 6 characters
-                unique_tsv_files = set()
-                for file in Path('data/fundamentals').glob('*_sec_data_*.tsv'):
-                    unique_tsv_files.add(file.name[:6])
-                unique_tsv_count = len(unique_tsv_files)
-    
-                # Fetch all concept values for this concept and filter numerics in Python
                 cursor = conn.execute("""
-                    SELECT DISTINCT ticker, concept_value 
+                    SELECT concept_value 
                     FROM concept_cache 
                     WHERE concept_tag = ?
                 """, (concept,))
-                results = cursor.fetchall()
-    
-                # Count only numerical values, handling commas and non-string values
-                numerical_cache_count = sum(
-                    1 for _, value in results 
-                    if isinstance(value, (int, float)) or (isinstance(value, str) and value.replace(",", "").replace(".", "", 1).isdigit())
+                cache_numerical_count = sum(
+                    1 for value, in cursor.fetchall()
+                    if isinstance(value, (int, float)) or 
+                       (isinstance(value, str) and value.replace(",", "").replace(".", "", 1).isdigit())
                 )
     
-                # Check for discrepancy with a threshold of 10%
-                if abs(unique_tsv_count - numerical_cache_count) > unique_tsv_count * 0.1:
+                tsv_numerical_count = 0
+                for file in Path('data/fundamentals').glob('*_sec_data_*.tsv'):
+                    with open(file, 'r') as f:
+                        reader = csv.DictReader(f, delimiter='\t')
+                        for row in reader:
+                            if concept in row:
+                                value = row[concept]
+                                if isinstance(value, (int, float)) or \
+                                   (isinstance(value, str) and value.replace(",", "").replace(".", "", 1).isdigit()):
+                                    tsv_numerical_count += 1
+    
+                if abs(tsv_numerical_count - cache_numerical_count) > tsv_numerical_count * 0.1:
                     self.console.print(f"[yellow]Warning: Numerical data inconsistency for {concept}")
-                    self.console.print(f"Unique TSV files: {unique_tsv_count}, Numerical cache records: {numerical_cache_count}")
+                    self.console.print(f"TSV numerical entries: {tsv_numerical_count}, Cache numerical entries: {cache_numerical_count}")
 
     def plot_na_distributions(self):
         """Create enhanced visualizations of missing data distributions."""
