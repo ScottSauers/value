@@ -227,7 +227,27 @@ class SECDataExtractor:
             try:
                 conn.execute('BEGIN IMMEDIATE')
                 
-                # Handle empty or missing data case
+                # First check if table exists with correct schema
+                cursor = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='concept_cache'")
+                existing_table = cursor.fetchone()
+                
+                if not existing_table:
+                    # If table doesn't exist, create it with correct schema
+                    conn.execute('''
+                        CREATE TABLE concept_cache (
+                            ticker TEXT,
+                            concept_tag TEXT,
+                            filing_date TEXT,
+                            concept_value REAL,
+                            taxonomy TEXT,
+                            units TEXT,
+                            fetch_status TEXT DEFAULT 'unknown',
+                            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            PRIMARY KEY (ticker, concept_tag, filing_date)
+                        )
+                    ''')
+                
+                # Rest of your existing empty/missing data handling
                 if data is None or data.empty:
                     conn.execute('''
                         INSERT OR REPLACE INTO concept_cache
@@ -238,10 +258,9 @@ class SECDataExtractor:
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
                     return
                 
-                # Prepare data for caching
+                # Prepare data for caching (your existing code)
                 cache_df = data.copy()
                 if concept.tag not in cache_df.columns:
-                    # If the expected tag is missing, treat it as 'N/A'
                     conn.execute('''
                         INSERT OR REPLACE INTO concept_cache
                         (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
@@ -250,31 +269,38 @@ class SECDataExtractor:
                     conn.commit()
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag} due to missing tag in data")
                     return
-
-                # Rename the concept column to 'concept_value'
+    
+                # Rename and prepare your dataframe as before
                 cache_df = cache_df.rename(columns={concept.tag: 'concept_value'})
                 cache_df['ticker'] = ticker
                 cache_df['concept_tag'] = concept.tag
                 cache_df['taxonomy'] = concept.taxonomy
                 cache_df['units'] = concept.units
-                
-                # Determine fetch_status based on concept_value
-                if cache_df['concept_value'].iloc[0] == 'N/A':
-                    cache_df['fetch_status'] = 'N/A'
-                else:
-                    cache_df['fetch_status'] = 'success'
-                
+                cache_df['fetch_status'] = 'N/A' if cache_df['concept_value'].iloc[0] == 'N/A' else 'success'
                 cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                # Delete existing data for the ticker and concept
+    
+                # Delete existing data for this ticker/concept combination
                 conn.execute('''
                     DELETE FROM concept_cache
                     WHERE ticker = ? AND concept_tag = ?
                 ''', (ticker, concept.tag))
-
-                # Insert new data
-                cache_df.to_sql('concept_cache', conn, if_exists='append',
-                               index=False, method='multi')
+    
+                # Insert new data using explicit INSERT
+                for _, row in cache_df.iterrows():
+                    conn.execute('''
+                        INSERT INTO concept_cache
+                        (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        row['ticker'],
+                        row['concept_tag'],
+                        row['filing_date'],
+                        row['concept_value'],
+                        row['taxonomy'],
+                        row['units'],
+                        row['fetch_status'],
+                        row['last_updated']
+                    ))
                 
                 conn.commit()
                 
@@ -283,7 +309,7 @@ class SECDataExtractor:
                     self.logger.info(f"Successfully cached data for {ticker} {concept.tag}")
                 elif status == 'N/A':
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
-                    
+                        
             except Exception as e:
                 conn.rollback()
                 self.logger.error(f"Error caching data for {ticker} {concept.tag}: {e}")
