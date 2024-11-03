@@ -58,6 +58,19 @@ class SECDataAnalyzer:
         self.logger.info(f"Found {len(tsv_files)} TSV files and {len(json_files)} JSON files")
         return tsv_files, json_files
 
+    def _safe_parse_date(self, date_str: str) -> pd.Timestamp:
+        """Safely parse date string with multiple fallback formats."""
+        try:
+            return pd.to_datetime(date_str, format='mixed')
+        except:
+            try:
+                # Try parsing just the date part if there's a time component
+                date_part = date_str.split()[0]
+                return pd.to_datetime(date_part)
+            except:
+                self.logger.warning(f"Could not parse date: {date_str}")
+                return None
+
     def analyze_file(self, tsv_path: Path, metadata_path: Path = None) -> Dict:
         """Analyze a single company's data file."""
         try:
@@ -76,7 +89,10 @@ class SECDataAnalyzer:
             na_percentages = (df.isna().sum() / len(df) * 100).to_dict()
             
             # Get date range coverage
-            df['filing_date'] = pd.to_datetime(df['filing_date'])
+            # Parse dates with fallback
+            df['filing_date'] = df['filing_date'].apply(self._safe_parse_date)
+            # Remove rows with invalid dates
+            df = df.dropna(subset=['filing_date'])
             years_coverage = (df['filing_date'].max() - df['filing_date'].min()).days / 365.25
             
             # Extract units from metadata if available
@@ -144,7 +160,13 @@ class SECDataAnalyzer:
     def generate_visualizations(self):
         """Create visualizations for the analysis results."""
         # Set style
-        plt.style.use('seaborn')
+        # Set default style
+plt.style.use('default')
+# Configure plot style manually
+plt.rcParams['figure.figsize'] = [12, 6]
+plt.rcParams['axes.grid'] = True
+plt.rcParams['grid.alpha'] = 0.3
+plt.rcParams['axes.axisbelow'] = True
         
         # 1. Histogram of N/A percentages by ticker
         plt.figure(figsize=(12, 6))
