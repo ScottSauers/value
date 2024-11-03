@@ -380,71 +380,80 @@ class SECDataExtractor:
         
         return result_df
 
-    def process_concept_batch(self, ticker: str, concepts: List[SECConcept], base_df: pd.DataFrame) -> pd.DataFrame:
-       """Process a batch of concepts for a given ticker."""
-       result_df = base_df.copy()
-       
-       # Log initial size
-       memory_usage = result_df.memory_usage(deep=True).sum()
-       self.logger.info(f"Initial batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
-       
-       for concept in concepts:
-           try:
-               cached_data = self.get_cached_concept(ticker, concept)
-               if cached_data is not None and not cached_data.empty and concept.tag in cached_data.columns:
-                   self.logger.info(f"Using cached data for {ticker} {concept.tag}")
-                   self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
-                   
-                   # Log incoming cached data size
-                   cached_memory = cached_data.memory_usage(deep=True).sum()
-                   self.logger.info(f"Cached data size: {cached_data.shape}, Memory: {cached_memory/1024/1024:.2f}MB ({cached_memory/1024/1024/1024:.3f}GB)")
-                   
-                   cached_data.reset_index(drop=True, inplace=True)
-                   result_df = pd.merge(result_df, cached_data, on='filing_date', how='left')
-                   
-                   # Log after merge
-                   memory_usage = result_df.memory_usage(deep=True).sum()
-                   self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
-                   continue
-    
-               df = self.rate_limited_get(
-                   tag=concept.tag,
-                   ticker=ticker,
-                   taxonomy=concept.taxonomy,
-                   units=concept.units
-               )
-               
-               if df is not None and not df.empty and 'value' in df.columns:
-                   if df['value'].iloc[0] != 'N/A':
-                       df = finagg.sec.api.filter_original_filings(df)
-                       df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
-                       df = df[['filing_date', concept.tag]]
-                       
-                       # Log incoming API data size
-                       api_memory = df.memory_usage(deep=True).sum()
-                       self.logger.info(f"API data size: {df.shape}, Memory: {api_memory/1024/1024:.2f}MB ({api_memory/1024/1024/1024:.3f}GB)")
-                       
-                       result_df = pd.merge(result_df, df, on='filing_date', how='left')
-                       self.cache_concept_data(ticker, concept, df)
-                       
-                       # Log after merge
-                       memory_usage = result_df.memory_usage(deep=True).sum()
-                       self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
-                   else:
-                       self.logger.info(f"No data available for {concept.tag} and {ticker}")
-                       self.cache_concept_data(ticker, concept, df)
-                   
-           except Exception as e:
-               self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
-               self.cache_concept_error(ticker, concept, str(e))
-           
-           gc.collect()
-       
-       # Log final batch size
-       memory_usage = result_df.memory_usage(deep=True).sum()
-       self.logger.info(f"Final batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
-       
-       return result_df
+    def process_concept_batch(self, concepts: List[SECConcept], base_df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        """Process a batch of concepts for a given ticker.
+        
+        Args:
+            concepts: List of SECConcept objects to process
+            base_df: Base DataFrame with filing dates
+            ticker: Stock ticker symbol
+        
+        Returns:
+            DataFrame with processed concept data merged
+        """
+        result_df = base_df.copy()
+        
+        # Log initial size
+        memory_usage = result_df.memory_usage(deep=True).sum()
+        self.logger.info(f"Initial batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
+        
+        for concept in concepts:
+            try:
+                cached_data = self.get_cached_concept(ticker, concept)
+                if cached_data is not None and not cached_data.empty and concept.tag in cached_data.columns:
+                    self.logger.info(f"Using cached data for {ticker} {concept.tag}")
+                    self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
+                    
+                    # Log incoming cached data size
+                    cached_memory = cached_data.memory_usage(deep=True).sum()
+                    self.logger.info(f"Cached data size: {cached_data.shape}, Memory: {cached_memory/1024/1024:.2f}MB ({cached_memory/1024/1024/1024:.3f}GB)")
+                    
+                    cached_data.reset_index(drop=True, inplace=True)
+                    result_df = pd.merge(result_df, cached_data, on='filing_date', how='left')
+                    
+                    # Log after merge
+                    memory_usage = result_df.memory_usage(deep=True).sum()
+                    self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
+                    continue
+     
+                df = self.rate_limited_get(
+                    tag=concept.tag,
+                    ticker=ticker,
+                    taxonomy=concept.taxonomy,
+                    units=concept.units
+                )
+                
+                if df is not None and not df.empty and 'value' in df.columns:
+                    if df['value'].iloc[0] != 'N/A':
+                        df = finagg.sec.api.filter_original_filings(df)
+                        df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
+                        df = df[['filing_date', concept.tag]]
+                        
+                        # Log incoming API data size
+                        api_memory = df.memory_usage(deep=True).sum()
+                        self.logger.info(f"API data size: {df.shape}, Memory: {api_memory/1024/1024:.2f}MB ({api_memory/1024/1024/1024:.3f}GB)")
+                        
+                        result_df = pd.merge(result_df, df, on='filing_date', how='left')
+                        self.cache_concept_data(ticker, concept, df)
+                        
+                        # Log after merge
+                        memory_usage = result_df.memory_usage(deep=True).sum()
+                        self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
+                    else:
+                        self.logger.info(f"No data available for {concept.tag} and {ticker}")
+                        self.cache_concept_data(ticker, concept, df)
+                    
+            except Exception as e:
+                self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
+                self.cache_concept_error(ticker, concept, str(e))
+            
+            gc.collect()
+        
+        # Log final batch size
+        memory_usage = result_df.memory_usage(deep=True).sum()
+        self.logger.info(f"Final batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
+        
+        return result_df
 
     def save_data(self, df: pd.DataFrame, ticker: str, metadata: Dict) -> Tuple[str, str]:
         """Save the SEC data and metadata to files with deduplication."""
