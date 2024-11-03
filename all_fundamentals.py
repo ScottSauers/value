@@ -188,7 +188,7 @@ class CacheManager:
                             FROM concept_cache 
                             WHERE last_updated > datetime("now", "-7 days")
                             GROUP BY ticker 
-                            HAVING COUNT(*) > 100
+                            HAVING COUNT(*) > 74
                         )
                     ''')
                     concept_count = cursor.fetchone()[0]
