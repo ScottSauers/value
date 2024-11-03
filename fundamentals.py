@@ -146,22 +146,14 @@ class SECDataExtractor:
         SECConcept("CapitalExpendituresIncurredButNotYetPaid"),
         SECConcept("PaymentsToAcquirePropertyPlantAndEquipment"),
         SECConcept("PaymentsToAcquireBusinessesNetOfCashAcquired"),
-        SECConcept("PaymentsToAcquireOtherInvestments"),
-        SECConcept("ProceedsFromMaturitiesPrepaymentsAndCallsOfAvailableForSaleSecurities"),
         SECConcept("ProceedsFromIssuanceOfLongTermDebt"),
         SECConcept("RepaymentsOfLongTermDebt"),
         SECConcept("PaymentsOfDividends"),
         SECConcept("PaymentsForRepurchaseOfCommonStock"),
         
-        # Other Important Metrics
+        # Other Metrics
         SECConcept("CommitmentsAndContingencies"),
-        SECConcept("GuaranteeObligations"),
-        SECConcept("SegmentReportingInformation"),
         SECConcept("LeaseCost"),
-        SECConcept("LeasePayments"),
-        SECConcept("StockRepurchaseProgramAuthorizedAmount"),
-        SECConcept("DerivativeInstrumentsAndHedgingActivitiesDisclosure"),
-        SECConcept("FairValueMeasurementsRecurring"),
         SECConcept("RevenueFromContractWithCustomerExcludingAssessedTax"),
         SECConcept("RevenueRemainingPerformanceObligation")
     ]
