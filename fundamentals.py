@@ -335,7 +335,7 @@ class SECDataExtractor:
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """Retrieve SEC fundamental data with efficient memory management."""
         CHUNK_SIZE = 10  # Process concepts in batches of 10
-        
+            
         def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
             for col in df.columns:
                 if df[col].dtype == 'float64':
@@ -343,8 +343,45 @@ class SECDataExtractor:
                 elif df[col].dtype == 'int64':
                     df[col] = pd.to_numeric(df[col], downcast='integer')
             return df
+    
+        # Get all unique dates first
+        all_dates = set()
+        valid_concepts = []  # Track concepts with valid data
+        for concept in self.SEC_CONCEPTS:
+            try:
+                cached_data = self.get_cached_concept(ticker, concept)
+                if cached_data is not None and not cached_data.empty:
+                    all_dates.update(cached_data['filing_date'])
+                    valid_concepts.append(concept)  # Regardless of N/A since we already checked empty
+            except Exception:
+                continue
         
-    def process_concept_batch(concepts: List[SECConcept], base_df: pd.DataFrame) -> pd.DataFrame:
+        if not all_dates or not valid_concepts:
+            self.logger.warning(f"No SEC data found for {ticker}")
+            return pd.DataFrame()
+        
+        # Create base dataframe
+        base_df = pd.DataFrame({'filing_date': sorted(list(all_dates))})
+        base_df = optimize_df(base_df)
+        
+        concept_batches = [
+            valid_concepts[i:i + CHUNK_SIZE] 
+            for i in range(0, len(valid_concepts), CHUNK_SIZE)
+        ]
+        
+        result_df = base_df
+        for batch_idx, concept_batch in enumerate(concept_batches, 1):
+            self.logger.info(f"Processing concept batch {batch_idx}/{len(concept_batches)}")
+            result_df = self.process_concept_batch(concept_batch, result_df)  # Add self.
+            gc.collect()
+        
+        result_df = result_df.sort_values('filing_date', ascending=False)
+        result_df = result_df.drop_duplicates(subset='filing_date')
+        
+        return result_df
+
+    def process_concept_batch(self, ticker: str, concepts: List[SECConcept], base_df: pd.DataFrame) -> pd.DataFrame:
+       """Process a batch of concepts for a given ticker."""
        result_df = base_df.copy()
        
        # Log initial size
