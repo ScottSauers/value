@@ -41,12 +41,25 @@ class SECDataQuality:
             partial_na_pct = stats.get('partial_na_percentage', 0)
             has_data_pct = 100 - missing_pct
             
-            # Identify missing data by checking NA percentages
+            # Get actual data availability from granular cache
             tickers_no_data = []
-            for ticker, ticker_stats in self.data['ticker_summary'].items():
-                na_percentages = ticker_stats.get('missing_concepts', 0)
-                if na_percentages > 0:
-                    tickers_no_data.append(ticker)
+            total_records = 0
+            with sqlite3.connect('data/fundamentals/cache/granular_cache.db') as conn:
+                # Count total records
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM concept_cache 
+                    WHERE concept_tag = ? 
+                    AND concept_value IS NOT NULL
+                """, (concept,))
+                total_records = cursor.fetchone()[0]
+                
+                # Get tickers with no data
+                cursor = conn.execute("""
+                    SELECT DISTINCT ticker FROM concept_cache 
+                    WHERE concept_tag = ? 
+                    AND (concept_value IS NULL OR concept_value = 'N/A')
+                """, (concept,))
+                tickers_no_data = [row[0] for row in cursor.fetchall()]
             
             results[concept] = {
                 'total_companies': total_tickers,
@@ -54,10 +67,67 @@ class SECDataQuality:
                 'companies_fully_missing_pct': missing_pct,
                 'companies_partial_na_pct': partial_na_pct,
                 'tickers_no_data': sorted(tickers_no_data),
-                'tickers_no_data_count': len(tickers_no_data)
+                'tickers_no_data_count': len(tickers_no_data),
+                'total_records': total_records
             }
         
         return results
+
+    def print_concept_details(self):
+        """Print detailed information about each concept's data availability."""
+        with sqlite3.connect('data/fundamentals/cache/granular_cache.db') as conn:
+            # Get all concepts and their counts
+            cursor = conn.execute("""
+                SELECT concept_tag, 
+                       COUNT(DISTINCT ticker) as company_count,
+                       COUNT(*) as record_count,
+                       COUNT(DISTINCT filing_date) as date_count,
+                       AVG(CASE WHEN concept_value IS NOT NULL THEN 1 ELSE 0 END) * 100 as data_pct
+                FROM concept_cache 
+                GROUP BY concept_tag
+                ORDER BY record_count DESC
+            """)
+            
+            table = Table(title="Detailed Concept Statistics")
+            table.add_column("Concept")
+            table.add_column("Companies", justify="right")
+            table.add_column("Total Records", justify="right")
+            table.add_column("Date Points", justify="right")
+            table.add_column("Data %", justify="right")
+            
+            for row in cursor:
+                table.add_row(
+                    row[0],
+                    str(row[1]),
+                    str(row[2]),
+                    str(row[3]),
+                    f"{row[4]:.1f}%"
+                )
+            
+            self.console.print(table)
+
+    def verify_data_consistency(self):
+        """Verify data consistency across different storage formats."""
+        with sqlite3.connect('data/fundamentals/cache/granular_cache.db') as conn:
+            # Check each concept
+            for concept in self.data['concept_summary'].keys():
+                if concept in ['ticker', 'filing_date', 'units', 'taxonomy']:
+                    continue
+                    
+                # Compare TSV files vs cache
+                tsv_count = len(list(Path('data/fundamentals').glob('*_sec_data_*.tsv')))
+                
+                cursor = conn.execute("""
+                    SELECT COUNT(DISTINCT ticker) 
+                    FROM concept_cache 
+                    WHERE concept_tag = ?
+                    AND concept_value IS NOT NULL
+                """, (concept,))
+                cache_count = cursor.fetchone()[0]
+                
+                if abs(tsv_count - cache_count) > tsv_count * 0.1:  # 10% threshold
+                    self.console.print(f"[yellow]Warning: Data inconsistency for {concept}")
+                    self.console.print(f"TSV files: {tsv_count}, Cache records: {cache_count}")
 
     def plot_na_distributions(self):
         """Create enhanced visualizations of missing data distributions."""
@@ -271,6 +341,8 @@ class SECDataQuality:
 def main():
     analyzer = SECDataQuality('data/fundamentals/analysis/analysis_report.json')
     analyzer.print_analysis()
+    analyzer.print_concept_details()
+    analyzer.verify_data_consistency()
 
 if __name__ == "__main__":
     main()
