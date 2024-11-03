@@ -23,6 +23,8 @@ import psutil
 import threading
 
 class CacheManager:
+    MIN_CONCEPT_THRESHOLD = 70  # Minimum concepts required for a ticker to be considered fully processed
+    
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -32,6 +34,7 @@ class CacheManager:
         self._init_db()
         self._check_schema()
         self.resync_ticker_cache()
+    
 
     def _init_db(self):
         """Initialize SQLite database with necessary tables."""
