@@ -129,9 +129,10 @@ class SECDataQuality:
                 """, (concept,))
                 results = cursor.fetchall()
     
-                # Count only numerical values, handling commas
+                # Count only numerical values, handling commas and non-string values
                 numerical_cache_count = sum(
-                    1 for _, value in results if value is not None and value != 'N/A' and value.replace(",", "").replace(".", "").isdigit()
+                    1 for _, value in results 
+                    if isinstance(value, (int, float)) or (isinstance(value, str) and value.replace(",", "").replace(".", "", 1).isdigit())
                 )
     
                 # Check for discrepancy with a threshold of 10%
