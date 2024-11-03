@@ -84,7 +84,7 @@ class CacheManager:
                     WHERE concept_value IS NOT NULL
                     AND last_updated > datetime('now', '-7 days')
                     GROUP BY ticker
-                    HAVING concept_count > 65
+                    HAVING concept_count > 74
                 ''')
                 ticker_stats = cursor.fetchall()
                 for ticker, _, last_update in ticker_stats:
