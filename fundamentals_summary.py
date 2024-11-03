@@ -210,7 +210,7 @@ class SECDataAnalyzer:
             'total_tickers': len(self.results['missing_data']),
             'concept_summary': {},
             'ticker_summary': {},
-            'units_summary': dict(self.results['units']),
+            'units_summary': {ticker: list(units) for ticker, units in self.results['units'].items()},
             'years_coverage_summary': {
                 'mean': np.mean(list(self.results['years_coverage'].values())),
                 'median': np.median(list(self.results['years_coverage'].values())),
@@ -226,7 +226,7 @@ class SECDataAnalyzer:
                     'missing_percentage': (stats['missing_count'] / stats['total_count']) * 100,
                     'partial_na_percentage': (stats['na_count'] / stats['total_count']) * 100,
                     'total_tickers': stats['total_count'],
-                    'units': list(stats['units'])
+                    'units': list(stats.get('units', []))
                 }
         
         # Ticker-level summary
@@ -235,7 +235,7 @@ class SECDataAnalyzer:
                 'average_na_percentage': np.mean(list(na_pcts.values())),
                 'missing_concepts': len(self.results['missing_data'][ticker]),
                 'years_coverage': self.results['years_coverage'][ticker],
-                'units': list(self.results['units'][ticker])
+                'units': list(self.results['units'].get(ticker, []))
             }
         
         # Save report
@@ -259,8 +259,20 @@ class SECDataAnalyzer:
         ticker_df.to_csv(self.output_dir / 'ticker_summary.csv')
         
         # Units summary table
-        units_df = pd.DataFrame.from_dict(report['units_summary'], orient='index')
-        units_df.to_csv(self.output_dir / 'units_summary.csv')
+        try:
+            units_df = pd.DataFrame.from_dict(report['units_summary'], orient='index')
+            units_df.to_csv(self.output_dir / 'units_summary.csv')
+        except Exception as e:
+            self.logger.error(f"Error saving units summary: {str(e)}")
+            
+        # Save the raw results as well for debugging
+        with open(self.output_dir / 'raw_results.json', 'w') as f:
+            json.dump({
+                'missing_data': dict(self.results['missing_data']),
+                'na_percentages': dict(self.results['na_percentages']),
+                'units': {k: list(v) for k, v in self.results['units'].items()},
+                'years_coverage': dict(self.results['years_coverage'])
+            }, f, indent=2)
 
     def run_analysis(self):
         """Run the complete analysis pipeline."""
