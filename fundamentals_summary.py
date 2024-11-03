@@ -127,8 +127,16 @@ class SECDataQuality:
                        (isinstance(value, str) and value.replace(",", "").replace(".", "", 1).isdigit())
                 )
     
+                # Group TSV files by the first six characters and keep only the most recent file in each group
+                tsv_files = Path('data/fundamentals').glob('*_sec_data_*.tsv')
+                grouped_files = {}
+                for file in tsv_files:
+                    key = file.name[:6]
+                    if key not in grouped_files or file.stat().st_mtime > grouped_files[key].stat().st_mtime:
+                        grouped_files[key] = file
+    
                 tsv_numerical_count = 0
-                for file in Path('data/fundamentals').glob('*_sec_data_*.tsv'):
+                for file in grouped_files.values():
                     with open(file, 'r') as f:
                         reader = csv.DictReader(f, delimiter='\t')
                         for row in reader:
