@@ -488,8 +488,8 @@ def parallel_process_tickers(
     # Setup environment, logging, and managers
     setup_environment()
     logger = setup_logging(output_path)
+    extractor = SECDataExtractor(str(output_dir))
     cache_manager = CacheManager(output_path / 'cache')
-    cache_manager.cleanup_old_entries()
     progress_tracker = ProgressTracker()
     
     # Generate batch ID
