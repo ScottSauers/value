@@ -161,12 +161,12 @@ class SECDataAnalyzer:
         """Create visualizations for the analysis results."""
         # Set style
         # Set default style
-plt.style.use('default')
-# Configure plot style manually
-plt.rcParams['figure.figsize'] = [12, 6]
-plt.rcParams['axes.grid'] = True
-plt.rcParams['grid.alpha'] = 0.3
-plt.rcParams['axes.axisbelow'] = True
+        plt.style.use('default')
+        # Configure plot style manually
+        plt.rcParams['figure.figsize'] = [12, 6]
+        plt.rcParams['axes.grid'] = True
+        plt.rcParams['grid.alpha'] = 0.3
+        plt.rcParams['axes.axisbelow'] = True
         
         # 1. Histogram of N/A percentages by ticker
         plt.figure(figsize=(12, 6))
