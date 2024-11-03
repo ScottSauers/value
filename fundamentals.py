@@ -1,9 +1,7 @@
-# fundamentals.py
-
 import os
 import finagg
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 from pathlib import Path
 from typing import Optional, Tuple, Dict, List
@@ -23,36 +21,17 @@ class SECConcept:
     units: str = "USD"
     description: str = ""
 
-class CacheManager:
-    """Manages caching of SEC fundamental data using SQLite."""
+class SECDataExtractor:
+    """Extracts raw SEC fundamental data with granular caching."""
     
-    MIN_CONCEPT_THRESHOLD = 70  # Minimum concepts required for a ticker to be considered fully processed
-    
-    def __init__(self, cache_dir: Path):
-        self.cache_dir = cache_dir
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.db_path = self.cache_dir / 'granular_cache.db'
-        self._lock = threading.Lock()
-        self.logger = logging.getLogger(__name__)
-        self._init_cache_db()
-        self._check_and_create_tables()
-        self.resync_ticker_cache()
-
-    def _init_cache_db(self):
-        """Initializes the cache database connection."""
-        try:
-            self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-            self.logger.info(f"Connected to cache database at {self.db_path}")
-        except Exception as e:
-            self.logger.error(f"Failed to connect to cache database: {e}")
-            raise
-
-    def _check_and_create_tables(self):
-        """Ensures that required tables exist in the cache database."""
-        with self.conn:
+    def _init_granular_cache(self):
+        """Initialize SQLite database with granular caching tables and improved schema."""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
             try:
-                # Create concept_cache table if it doesn't exist
-                self.conn.execute('''
+                conn.execute('BEGIN IMMEDIATE')
+                
+                # Table for storing individual concept data points with fetch status
+                conn.execute('''
                     CREATE TABLE IF NOT EXISTS concept_cache (
                         ticker TEXT,
                         concept_tag TEXT,
@@ -66,8 +45,8 @@ class CacheManager:
                     )
                 ''')
                 
-                # Create concept_status table if it doesn't exist
-                self.conn.execute('''
+                # Table for tracking concept fetch status with more detail
+                conn.execute('''
                     CREATE TABLE IF NOT EXISTS concept_status (
                         ticker TEXT,
                         concept_tag TEXT,
@@ -80,152 +59,21 @@ class CacheManager:
                 ''')
                 
                 # Create indices for better performance
-                self.conn.execute('''
+                conn.execute('''
                     CREATE INDEX IF NOT EXISTS idx_concept_cache_ticker 
                     ON concept_cache(ticker)
                 ''')
-                self.conn.execute('''
+                conn.execute('''
                     CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated 
                     ON concept_cache(last_updated)
                 ''')
                 
-                self.logger.info("Verified existence of concept_cache and concept_status tables.")
+                conn.commit()
+                self.logger.info("Initialized granular_cache.db with concept_cache and concept_status tables.")
             except Exception as e:
-                self.logger.error(f"Error creating tables: {e}")
+                conn.rollback()
+                self.logger.error(f"Error initializing granular_cache.db: {e}")
                 raise
-
-    def resync_ticker_cache(self):
-        """Rebuild ticker_cache.db by identifying tickers with sufficient cached data."""
-        ticker_stats_dict = {}
-
-        # Scan existing cached tickers
-        try:
-            cursor = self.conn.execute('''
-                SELECT ticker, COUNT(DISTINCT concept_tag) as concept_count
-                FROM concept_cache 
-                WHERE last_updated > datetime('now', '-7 days')
-                GROUP BY ticker
-                HAVING concept_count >= ?
-            ''', (self.MIN_CONCEPT_THRESHOLD,))
-            ticker_stats = cursor.fetchall()
-            for ticker, concept_count in ticker_stats:
-                ticker_stats_dict[ticker] = concept_count
-            self.logger.info(f"Resynced ticker cache with {len(ticker_stats_dict)} tickers.")
-        except Exception as e:
-            self.logger.error(f"Error during resync_ticker_cache: {e}")
-            raise
-
-    def get_cached_concept(self, ticker: str, concept: SECConcept) -> Optional[pd.DataFrame]:
-        """Retrieve cached data for a specific concept if available."""
-        query = '''
-            SELECT filing_date, concept_value as value
-            FROM concept_cache 
-            WHERE ticker = ? AND concept_tag = ?
-            AND last_updated > datetime('now', '-7 days')
-            ORDER BY filing_date DESC
-        '''
-        try:
-            df = pd.read_sql_query(query, self.conn, params=(ticker, concept.tag))
-            if not df.empty:
-                # Rename columns to match expected format
-                df = df.rename(columns={'value': concept.tag})
-                return df
-        except Exception as e:
-            self.logger.debug(f"Cache miss for {ticker} {concept.tag}: {str(e)}")
-        return None
-
-    def cache_concept_data(self, ticker: str, concept: SECConcept, data: pd.DataFrame):
-        """Cache the data for a specific concept with explicit missing data handling."""
-        try:
-            with self._lock:
-                # Handle empty or missing data case
-                if data is None or data.empty:
-                    self.conn.execute('''
-                        INSERT OR REPLACE INTO concept_cache
-                        (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
-                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'N/A', datetime('now'))
-                    ''', (ticker, concept.tag, concept.taxonomy, concept.units))
-                    self.conn.commit()
-                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
-                    return
-                
-                # Prepare data for caching
-                cache_df = data.copy()
-                if concept.tag not in cache_df.columns:
-                    # If the expected tag is missing, treat it as 'N/A'
-                    self.conn.execute('''
-                        INSERT OR REPLACE INTO concept_cache
-                        (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
-                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'N/A', datetime('now'))
-                    ''', (ticker, concept.tag, concept.taxonomy, concept.units))
-                    self.conn.commit()
-                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag} due to missing tag in data")
-                    return
-
-                # Rename the concept column to 'concept_value'
-                cache_df = cache_df.rename(columns={concept.tag: 'concept_value'})
-                cache_df['taxonomy'] = concept.taxonomy
-                cache_df['units'] = concept.units
-                
-                # Determine fetch_status based on concept_value
-                if cache_df['concept_value'].iloc[0] == 'N/A':
-                    fetch_status = 'N/A'
-                else:
-                    fetch_status = 'success'
-                
-                cache_df['fetch_status'] = fetch_status
-                cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                # Insert or replace records
-                cache_df.to_sql('concept_cache', self.conn, if_exists='append', index=False, method='multi')
-                self.conn.commit()
-                
-                self.logger.info(f"Successfully cached data for {ticker} {concept.tag}")
-        except Exception as e:
-            self.conn.rollback()
-            self.logger.error(f"Error caching data for {ticker} {concept.tag}: {e}")
-            raise
-
-    def cache_concept_error(self, ticker: str, concept: SECConcept, error: str):
-        """Cache error status for a concept."""
-        try:
-            with self._lock:
-                self.conn.execute('''
-                    INSERT OR REPLACE INTO concept_status 
-                    (ticker, concept_tag, last_attempt, status, error)
-                    VALUES (?, ?, CURRENT_TIMESTAMP, 'error', ?)
-                ''', (ticker, concept.tag, str(error)))
-                self.conn.commit()
-        except Exception as e:
-            self.conn.rollback()
-            self.logger.error(f"Error caching concept error for {ticker} {concept.tag}: {e}")
-            raise
-
-    def get_processed_tickers_count(self) -> int:
-        """Get count of successfully processed tickers within the last 7 days that meet the concept threshold."""
-        try:
-            cursor = self.conn.execute('''
-                SELECT COUNT(DISTINCT ticker) FROM concept_cache
-                WHERE last_updated > datetime('now', '-7 days')
-                GROUP BY ticker
-                HAVING COUNT(DISTINCT concept_tag) >= ?
-            ''', (self.MIN_CONCEPT_THRESHOLD,))
-            count = len(cursor.fetchall())
-            return count
-        except Exception as e:
-            self.logger.error(f"Error counting processed tickers: {e}")
-            return 0
-
-    def close_connection(self):
-        """Closes the cache database connection."""
-        try:
-            self.conn.close()
-            self.logger.info("Closed cache database connection.")
-        except Exception as e:
-            self.logger.error(f"Error closing cache database: {e}")
-
-class SECDataExtractor:
-    """Extracts raw SEC fundamental data with granular caching."""
     
     # Comprehensive list of SEC concepts to collect
     SEC_CONCEPTS = [
@@ -318,18 +166,137 @@ class SECDataExtractor:
         SECConcept("RevenueRemainingPerformanceObligation")
     ]
 
-    # Rate limiting parameters
+    # Class-level variables for rate limiting
     _rate_limit_lock = threading.Lock()
     _request_timestamps: List[float] = []
     _MAX_CALLS = 5
     _PERIOD = 1.0  # seconds
 
-    def __init__(self, cache_manager: CacheManager, output_dir: str = "./data"):
-        """Initialize the extractor with cache manager and output directory."""
-        self.cache_manager = cache_manager
+    def __init__(self, output_dir: str = "./data"):
+        """Initialize the extractor with output directory."""
+        load_dotenv()
+        # Set SEC API user agent
+        sec_user_agent = os.getenv('SEC_API_USER_AGENT')
+        if not sec_user_agent:
+            raise ValueError("SEC_API_USER_AGENT environment variable not set")
+        
+        # Set the user agent for finagg
+        finagg.sec.api.USER_AGENT = sec_user_agent
+        
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(self.output_dir / 'sec_data.log'),
+                logging.StreamHandler()
+            ]
+        )
         self.logger = logging.getLogger(__name__)
+
+        self.cache_dir = Path(output_dir) / 'cache'
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._init_granular_cache()
+
+    def get_cached_concept(self, ticker: str, concept: SECConcept) -> Optional[pd.DataFrame]:
+        """Retrieve cached data for a specific concept if available."""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+            query = '''
+                SELECT filing_date, concept_value as value
+                FROM concept_cache 
+                WHERE ticker = ? AND concept_tag = ?
+                AND last_updated > datetime('now', '-7 days')
+                ORDER BY filing_date DESC
+            '''
+            try:
+                df = pd.read_sql_query(query, conn, params=(ticker, concept.tag))
+                if not df.empty:
+                    # Rename columns to match expected format
+                    df = df.rename(columns={'value': concept.tag})
+                    return df
+            except Exception as e:
+                self.logger.debug(f"Cache miss for {ticker} {concept.tag}: {str(e)}")
+        return None
+
+    
+    def cache_concept_data(self, ticker: str, concept: SECConcept, data: pd.DataFrame):
+        """Cache the data for a specific concept with explicit missing data handling."""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+            try:
+                conn.execute('BEGIN IMMEDIATE')
+                
+                # Handle empty or missing data case
+                if data is None or data.empty:
+                    conn.execute('''
+                        INSERT OR REPLACE INTO concept_cache
+                        (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
+                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'N/A', datetime('now'))
+                    ''', (ticker, concept.tag, concept.taxonomy, concept.units))
+                    conn.commit()
+                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
+                    return
+                
+                # Prepare data for caching
+                cache_df = data.copy()
+                if concept.tag not in cache_df.columns:
+                    # If the expected tag is missing, treat it as 'N/A'
+                    conn.execute('''
+                        INSERT OR REPLACE INTO concept_cache
+                        (ticker, concept_tag, filing_date, concept_value, taxonomy, units, fetch_status, last_updated)
+                        VALUES (?, ?, datetime('now'), NULL, ?, ?, 'N/A', datetime('now'))
+                    ''', (ticker, concept.tag, concept.taxonomy, concept.units))
+                    conn.commit()
+                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag} due to missing tag in data")
+                    return
+
+                # Rename the concept column to 'concept_value'
+                cache_df = cache_df.rename(columns={concept.tag: 'concept_value'})
+                cache_df['ticker'] = ticker
+                cache_df['concept_tag'] = concept.tag
+                cache_df['taxonomy'] = concept.taxonomy
+                cache_df['units'] = concept.units
+                
+                # Determine fetch_status based on concept_value
+                if cache_df['concept_value'].iloc[0] == 'N/A':
+                    cache_df['fetch_status'] = 'N/A'
+                else:
+                    cache_df['fetch_status'] = 'success'
+                
+                cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                # Delete existing data for the ticker and concept
+                conn.execute('''
+                    DELETE FROM concept_cache
+                    WHERE ticker = ? AND concept_tag = ?
+                ''', (ticker, concept.tag))
+
+                # Insert new data
+                cache_df.to_sql('concept_cache', conn, if_exists='append',
+                               index=False, method='multi')
+                
+                conn.commit()
+                
+                status = cache_df['fetch_status'].iloc[0]
+                if status == 'success':
+                    self.logger.info(f"Successfully cached data for {ticker} {concept.tag}")
+                elif status == 'N/A':
+                    self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
+                    
+            except Exception as e:
+                conn.rollback()
+                self.logger.error(f"Error caching data for {ticker} {concept.tag}: {e}")
+                raise
+
+    def cache_concept_error(self, ticker: str, concept: SECConcept, error: str):
+        """Cache error status for a concept."""
+        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO concept_status 
+                (ticker, concept_tag, last_attempt, status, error)
+                VALUES (?, ?, CURRENT_TIMESTAMP, 'error', ?)
+            ''', (ticker, concept.tag, str(error)))
 
     def rate_limited_get(self, tag: str, ticker: str, taxonomy: str, units: str) -> pd.DataFrame:
         """
@@ -348,7 +315,6 @@ class SECDataExtractor:
                     # Record the current timestamp and proceed
                     SECDataExtractor._request_timestamps.append(current_time)
                     break
-            time.sleep(0.05)  # Sleep briefly to prevent tight loop
 
         try:
             response = finagg.sec.api.company_concept.get(
@@ -367,10 +333,7 @@ class SECDataExtractor:
                     'value': ['N/A'],
                     'filed': [datetime.now().strftime('%Y-%m-%d')]
                 })
-            else:
-                self.logger.error(f"Error fetching data for {tag} and {ticker}: {str(e)}")
-                raise
-
+    
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """Retrieve SEC fundamental data with efficient memory management."""
         CHUNK_SIZE = 10  # Process concepts in batches of 10
@@ -382,19 +345,19 @@ class SECDataExtractor:
                 elif df[col].dtype == 'int64':
                     df[col] = pd.to_numeric(df[col], downcast='integer')
             return df
-
-        # Get all unique filing dates from cached data
+    
+        # Get all unique dates first
         all_dates = set()
         valid_concepts = []  # Track concepts with valid data
         for concept in self.SEC_CONCEPTS:
             try:
-                cached_data = self.cache_manager.get_cached_concept(ticker, concept)
+                cached_data = self.get_cached_concept(ticker, concept)
                 if cached_data is not None and not cached_data.empty:
                     all_dates.update(cached_data['filing_date'])
-                    valid_concepts.append(concept)
+                    valid_concepts.append(concept)  # Regardless of N/A since we already checked empty
             except Exception:
                 continue
-
+        
         if not all_dates or not valid_concepts:
             self.logger.warning(f"No SEC data found for {ticker}")
             return pd.DataFrame()
@@ -419,25 +382,48 @@ class SECDataExtractor:
         
         return result_df
 
+
     def process_concept_batch(self, concepts: List[SECConcept], base_df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-        """Process a batch of concepts for a given ticker."""
+        """Process a batch of concepts for a given ticker.
+        
+        Args:
+            concepts: List of SECConcept objects to process
+            base_df: Base DataFrame with filing dates
+            ticker: Stock ticker symbol
+        
+        Returns:
+            DataFrame with processed concept data merged
+        """
         result_df = base_df.copy()
         
         # Log initial size
         memory_usage = result_df.memory_usage(deep=True).sum()
-        self.logger.info(f"Initial batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB")
+        self.logger.info(f"Initial batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
         
         for concept in concepts:
             try:
-                cached_data = self.cache_manager.get_cached_concept(ticker, concept)
+                cached_data = self.get_cached_concept(ticker, concept)
                 if cached_data is not None and not cached_data.empty and concept.tag in cached_data.columns:
                     self.logger.info(f"Using cached data for {ticker} {concept.tag}")
+                    self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
                     
-                    # Deduplicate cached data by filing date
-                    cached_data = cached_data.sort_values('filing_date').drop_duplicates('filing_date', keep='last')
+                    # Log incoming cached data size
+                    cached_memory = cached_data.memory_usage(deep=True).sum()
+                    self.logger.info(f"Cached data size: {cached_data.shape}, Memory: {cached_memory/1024/1024:.2f}MB ({cached_memory/1024/1024/1024:.3f}GB)")
                     
-                    # Merge with base dataframe
-                    result_df = pd.merge(result_df, cached_data[['filing_date', concept.tag]], on='filing_date', how='left')
+                    # Deduplicate cached data by most recent filing
+                    cached_data = cached_data.sort_values('filing_date').groupby('filing_date').last().reset_index()
+                    
+                    # Set up indexes for efficient joining
+                    if 'filing_date' not in result_df.index.names:
+                        result_df = result_df.set_index('filing_date')
+                    cached_data = cached_data.set_index('filing_date')
+                    
+                    # Join using index (more efficient than merge)
+                    result_df = result_df.join(cached_data[[concept.tag]], how='left')
+                    
+                    # Reset index for next iteration
+                    result_df = result_df.reset_index()
                     
                     # Validate no row explosion occurred
                     if len(result_df) > len(base_df) * 1.1:  # Allow 10% tolerance
@@ -445,10 +431,9 @@ class SECDataExtractor:
                     
                     # Log after merge
                     memory_usage = result_df.memory_usage(deep=True).sum()
-                    self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB")
+                    self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
                     continue
      
-                # Fetch data from API with rate limiting
                 df = self.rate_limited_get(
                     tag=concept.tag,
                     ticker=ticker,
@@ -462,33 +447,45 @@ class SECDataExtractor:
                         df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
                         df = df[['filing_date', concept.tag]]
                         
-                        # Deduplicate API data by filing date
-                        df = df.sort_values('filing_date').drop_duplicates('filing_date', keep='last')
+                        # Log incoming API data size
+                        api_memory = df.memory_usage(deep=True).sum()
+                        self.logger.info(f"API data size: {df.shape}, Memory: {api_memory/1024/1024:.2f}MB ({api_memory/1024/1024/1024:.3f}GB)")
                         
-                        # Merge with base dataframe
-                        result_df = pd.merge(result_df, df, on='filing_date', how='left')
+                        # Deduplicate API data by most recent filing
+                        df = df.sort_values('filing_date').groupby('filing_date').last().reset_index()
+                        
+                        # Set up indexes for efficient joining
+                        if 'filing_date' not in result_df.index.names:
+                            result_df = result_df.set_index('filing_date')
+                        df = df.set_index('filing_date')
+                        
+                        # Join using index (more efficient than merge)
+                        result_df = result_df.join(df[[concept.tag]], how='left')
+                        
+                        # Reset index for next iteration 
+                        result_df = result_df.reset_index()
                         
                         # Validate no row explosion occurred
                         if len(result_df) > len(base_df) * 1.1:  # Allow 10% tolerance
                             raise ValueError(f"Unexpected row multiplication for {concept.tag} in API data")
-                        self.cache_manager.cache_concept_data(ticker, concept, df)
+                        self.cache_concept_data(ticker, concept, df)
                         
                         # Log after merge
                         memory_usage = result_df.memory_usage(deep=True).sum()
-                        self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB")
+                        self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
                     else:
                         self.logger.info(f"No data available for {concept.tag} and {ticker}")
-                        self.cache_manager.cache_concept_data(ticker, concept, df)
+                        self.cache_concept_data(ticker, concept, df)
                     
             except Exception as e:
                 self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
-                self.cache_manager.cache_concept_error(ticker, concept, str(e))
+                self.cache_concept_error(ticker, concept, str(e))
             
             gc.collect()
         
         # Log final batch size
         memory_usage = result_df.memory_usage(deep=True).sum()
-        self.logger.info(f"Final batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB")
+        self.logger.info(f"Final batch size: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
         
         return result_df
 
@@ -559,6 +556,21 @@ class SECDataExtractor:
             self.logger.error(f"Failed to process {ticker}: {str(e)}")
             raise
 
-    def __del__(self):
-        """Destructor to ensure the cache database connection is closed."""
-        self.close_connection()
+def main():
+    """Main execution function."""
+    extractor = SECDataExtractor()
+    
+    # List of tickers to process
+    tickers = ["AAPL"]
+    
+    for ticker in tickers:
+        try:
+            data_file, metadata_file = extractor.process_ticker(ticker)
+            print(f"Successfully processed {ticker}")
+            print(f"Data file: {data_file}")
+            print(f"Metadata file: {metadata_file}")
+        except Exception as e:
+            print(f"Failed to process {ticker}: {str(e)}")
+
+if __name__ == "__main__":
+    main()
