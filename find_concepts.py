@@ -8,6 +8,7 @@ from pathlib import Path
 from tqdm import tqdm
 from threading import Lock
 from collections import deque
+import re
 
 # Configuration
 INPUT_FILE = 'small_cap_stocks_latest.csv'
@@ -60,7 +61,7 @@ def rate_limited_request(url, headers):
     return response
 
 # Retrieve XBRL tags for a company's latest 10-K filing
-def get_xbrl_tags(cik: str) -> dict:
+def get_xbrl_tags(cik: str) -> set:
     try:
         search_url = f'https://data.sec.gov/submissions/CIK{cik}.json'
         headers = {'User-Agent': USER_AGENT}
@@ -102,20 +103,14 @@ def get_xbrl_tags(cik: str) -> dict:
         response.raise_for_status()
         root = ET.fromstring(response.content)
 
-        # Collect and format tags by namespace
-        tags = {}
+        # Collect and format tags by concept
+        concepts = set()
         for element in root.iter():
-            namespace = element.tag.split('}')[0].strip('{')
-            tag_name = element.tag.split('}')[1] if '}' in element.tag else element.tag
-            if namespace not in tags:
-                tags[namespace] = []
-            tags[namespace].append(tag_name)
+            tag_name = element.tag.split('}')[-1]  # Extract tag name after namespace
+            concept_name = re.sub(r'\d{4}', '', tag_name)  # Remove any years from the tag name
+            concepts.add(concept_name)
 
-        # Deduplicate tags within each namespace
-        for ns in tags:
-            tags[ns] = sorted(set(tags[ns]))
-
-        return tags
+        return concepts
 
     except Exception as e:
         logger.error(f"Failed to retrieve XBRL tags for CIK {cik}: {e}")
@@ -169,10 +164,7 @@ def main():
                 no_10k_count += 1
                 no_10k_tickers.add(ticker)
             else:
-                all_data[ticker] = {}
-                for namespace, tag_list in tags.items():
-                    for tag in tag_list:
-                        all_data[ticker][f"{namespace}:{tag}"] = 1
+                all_data[ticker] = {tag: 1 for tag in tags}
 
             pbar.update(1)
 
@@ -189,7 +181,7 @@ def main():
 
     if all_data:
         final_data = pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T
-        print("\nNamespace Tags Summary:")
+        print("\nConcept Tags Summary:")
         for ticker in final_data.columns:
             concept_count = final_data[ticker].sum()
             logger.info(f"Ticker: {ticker}, Total Concepts Extracted: {int(concept_count)}")
