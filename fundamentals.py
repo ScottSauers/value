@@ -22,58 +22,58 @@ class SECConcept:
     description: str = ""
 
 class SECDataExtractor:
-    """Extracts raw SEC fundamental data with granular caching."""
+    _init_lock = threading.Lock()
     
     def _init_granular_cache(self):
-        """Initialize SQLite database with granular caching tables and improved schema."""
-        with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
-            try:
-                conn.execute('BEGIN IMMEDIATE')
-                
-                # Table for storing individual concept data points with fetch status
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS concept_cache (
-                        ticker TEXT,
-                        concept_tag TEXT,
-                        filing_date TEXT,
-                        concept_value REAL,
-                        taxonomy TEXT,
-                        units TEXT,
-                        fetch_status TEXT DEFAULT 'unknown',
-                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (ticker, concept_tag, filing_date)
-                    )
-                ''')
-                
-                # Table for tracking concept fetch status with more detail
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS concept_status (
-                        ticker TEXT,
-                        concept_tag TEXT,
-                        last_attempt TIMESTAMP,
-                        status TEXT,
-                        error TEXT,
-                        retry_count INTEGER DEFAULT 0,
-                        PRIMARY KEY (ticker, concept_tag)
-                    )
-                ''')
-                
-                # Create indices for better performance
-                conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_concept_cache_ticker 
-                    ON concept_cache(ticker)
-                ''')
-                conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated 
-                    ON concept_cache(last_updated)
-                ''')
-                
-                conn.commit()
-                self.logger.info("Initialized granular_cache.db with concept_cache and concept_status tables.")
-            except Exception as e:
-                conn.rollback()
-                self.logger.error(f"Error initializing granular_cache.db: {e}")
-                raise
+        with SECDataExtractor._init_lock:
+            with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
+                try:
+                    conn.execute('BEGIN IMMEDIATE')
+                    
+                    # Table for storing individual concept data points with fetch status
+                    conn.execute('''
+                        CREATE TABLE IF NOT EXISTS concept_cache (
+                            ticker TEXT,
+                            concept_tag TEXT,
+                            filing_date TEXT,
+                            concept_value REAL,
+                            taxonomy TEXT,
+                            units TEXT,
+                            fetch_status TEXT DEFAULT 'unknown',
+                            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            PRIMARY KEY (ticker, concept_tag, filing_date)
+                        )
+                    ''')
+                    
+                    # Table for tracking concept fetch status with more detail
+                    conn.execute('''
+                        CREATE TABLE IF NOT EXISTS concept_status (
+                            ticker TEXT,
+                            concept_tag TEXT,
+                            last_attempt TIMESTAMP,
+                            status TEXT,
+                            error TEXT,
+                            retry_count INTEGER DEFAULT 0,
+                            PRIMARY KEY (ticker, concept_tag)
+                        )
+                    ''')
+                    
+                    # Create indices for better performance
+                    conn.execute('''
+                        CREATE INDEX IF NOT EXISTS idx_concept_cache_ticker 
+                        ON concept_cache(ticker)
+                    ''')
+                    conn.execute('''
+                        CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated 
+                        ON concept_cache(last_updated)
+                    ''')
+                    
+                    conn.commit()
+                    self.logger.info("Initialized granular_cache.db with concept_cache and concept_status tables.")
+                except Exception as e:
+                    conn.rollback()
+                    self.logger.error(f"Error initializing granular_cache.db: {e}")
+                    raise
     
     # Comprehensive list of SEC concepts to collect
     SEC_CONCEPTS = [
