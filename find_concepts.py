@@ -6,16 +6,19 @@ import logging
 import time
 from pathlib import Path
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configuration
 INPUT_FILE = 'small_cap_stocks_latest.csv'
 TICKER_COLUMN = 'ticker'
-USER_AGENT = 'useragent@email.com'  # Use a valid email
+USER_AGENT = 'useragent@email.com'  # Replace with a valid email
 OUTPUT_DIR = Path("./output")
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 CSV_PATH = OUTPUT_DIR / "company_xbrl_tags_summary.csv"
 NO_10K_CSV_PATH = OUTPUT_DIR / "no_10k_tickers.csv"
 FILING_TYPE = '10-K'
+MAX_REQUESTS_PER_SECOND = 10
+BATCH_SIZE = MAX_REQUESTS_PER_SECOND
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -97,6 +100,24 @@ def get_xbrl_tags(cik: str) -> dict:
         logger.error(f"Failed to retrieve XBRL tags for CIK {cik}: {e}")
         return None
 
+# Function to process a single ticker and fetch its XBRL tags
+def process_ticker(ticker):
+    try:
+        cik = finagg.sec.api.get_cik(ticker, user_agent=USER_AGENT)
+    except Exception as e:
+        logger.error(f"Error retrieving CIK for {ticker}: {e}")
+        return ticker, None, None
+
+    if not cik:
+        logger.warning(f"No CIK found for ticker {ticker}")
+        return ticker, None, None
+
+    tags = get_xbrl_tags(cik)
+    if tags is None:
+        return ticker, None, None
+
+    return ticker, cik, tags
+
 # Main processing function
 def main():
     # Load tickers from input file
@@ -108,41 +129,36 @@ def main():
         logger.error(f"Error loading tickers from {INPUT_FILE}: {e}")
         return
 
-    # Placeholder for data collection
-    data_dict = {ticker: {} for ticker in tickers}
+    all_data = {ticker: {} for ticker in tickers}
     no_10k_count = 0
 
-    for ticker in tqdm(tickers, desc="Processing tickers"):
-        logger.info(f"Processing {ticker}")
-        try:
-            cik = finagg.sec.api.get_cik(ticker, user_agent=USER_AGENT)
-        except Exception as e:
-            logger.error(f"Error retrieving CIK for {ticker}: {e}")
-            continue
+    with ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
+        futures = []
+        for i in range(0, len(tickers), BATCH_SIZE):
+            batch = tickers[i:i + BATCH_SIZE]
+            for ticker in batch:
+                futures.append(executor.submit(process_ticker, ticker))
 
-        if not cik:
-            logger.warning(f"No CIK found for ticker {ticker}")
-            continue
+            # Wait for the batch to complete and apply the rate limit
+            for future in as_completed(futures):
+                ticker, cik, tags = future.result()
+                if ticker is None:
+                    continue
 
-        tags = get_xbrl_tags(cik)
-        if tags:
-            # Flatten and populate the data_dict with tags
-            for namespace, tag_list in tags.items():
-                for tag in tag_list:
-                    data_dict[ticker][f"{namespace}:{tag}"] = 1  # Mark presence of tag for this ticker
-        else:
-            no_10k_count += 1
-            no_10k_tickers.add(ticker)
+                if tags is None:
+                    no_10k_count += 1
+                    no_10k_tickers.add(ticker)
+                else:
+                    for namespace, tag_list in tags.items():
+                        for tag in tag_list:
+                            all_data[ticker][f"{namespace}:{tag}"] = 1
 
-            # Save to no_10k CSV after each ticker without 10-K found
+            # Save incremental results to prevent data loss
+            pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T.to_csv(CSV_PATH)
             pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
-            continue
 
-        # Save incremental progress to CSV for each ticker processed
-        pd.DataFrame.from_dict(data_dict, orient='index').fillna(0).T.to_csv(CSV_PATH)
-
-        # Pause to respect SEC rate limits
-        time.sleep(0.1)
+            # Pause to respect the rate limit
+            time.sleep(1)  # Limit to max 10 requests per second by pausing 1 sec after each batch
 
     # Final summary statistics
     total_tickers = len(tickers)
