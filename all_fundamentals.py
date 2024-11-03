@@ -146,7 +146,7 @@ class CacheManager:
                     WHERE ticker = ? AND last_processed > datetime("now", "-7 days")
                 ''', (ticker,))
                 result = cursor.fetchone()
-
+    
                 if result:
                     # Count the number of concepts present for this ticker
                     concept_count_cursor = conn.execute('''
@@ -156,7 +156,7 @@ class CacheManager:
                           AND last_updated > datetime("now", "-7 days")
                     ''', (ticker,))
                     concept_count = concept_count_cursor.fetchone()[0] if concept_count_cursor else 0
-
+    
                     return {
                         'ticker': result[0],
                         'last_processed': result[1],
@@ -167,7 +167,7 @@ class CacheManager:
                         'data_hash': result[6],
                         'concept_count': concept_count
                     }
-
+    
                 # If not found, mark as processing
                 conn.execute('''
                     INSERT OR REPLACE INTO processed_tickers 
@@ -176,7 +176,7 @@ class CacheManager:
                 ''', (ticker,))
                 conn.commit()
                 return None
-
+    
     def get_processed_tickers_count(self) -> int:
         """Get count of successfully processed tickers within the last 7 days that meet the concept threshold."""
         # Get count from processed_tickers in ticker_cache.db
