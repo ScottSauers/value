@@ -139,13 +139,13 @@ class SECDataQuality:
                     self.console.print(f"[yellow]Warning: Numerical data inconsistency for {concept}")
                     self.console.print(f"Unique TSV files: {unique_tsv_count}, Numerical cache records: {numerical_cache_count}")
 
-    def is_numeric(value: str) -> bool:
-        """Check if a string value is numeric, allowing for commas."""
-        try:
-            float(value.replace(",", ""))
-            return True
-        except ValueError:
-            return False
+        def is_numeric(value: str) -> bool:
+            """Check if a string value is numeric, allowing for commas."""
+            try:
+                float(value.replace(",", ""))
+                return True
+            except ValueError:
+                return False
 
 
     def plot_na_distributions(self):
