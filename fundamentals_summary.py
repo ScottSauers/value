@@ -121,7 +121,7 @@ class SECDataQuality:
                     unique_tsv_files.add(file.name[:6])
                 unique_tsv_count = len(unique_tsv_files)
     
-                # Fetch all concept values for this concept and filter numerics
+                # Fetch all concept values for this concept and filter numerics in Python
                 cursor = conn.execute("""
                     SELECT DISTINCT ticker, concept_value 
                     FROM concept_cache 
@@ -129,24 +129,15 @@ class SECDataQuality:
                 """, (concept,))
                 results = cursor.fetchall()
     
-                # Filter only numerical values (handling commas) 
+                # Count only numerical values, handling commas
                 numerical_cache_count = sum(
-                    1 for _, value in results if is_numeric(value)
+                    1 for _, value in results if value is not None and value != 'N/A' and value.replace(",", "").replace(".", "").isdigit()
                 )
     
                 # Check for discrepancy with a threshold of 10%
                 if abs(unique_tsv_count - numerical_cache_count) > unique_tsv_count * 0.1:
                     self.console.print(f"[yellow]Warning: Numerical data inconsistency for {concept}")
                     self.console.print(f"Unique TSV files: {unique_tsv_count}, Numerical cache records: {numerical_cache_count}")
-
-        def is_numeric(value: str) -> bool:
-            """Check if a string value is numeric, allowing for commas."""
-            try:
-                float(value.replace(",", ""))
-                return True
-            except ValueError:
-                return False
-
 
     def plot_na_distributions(self):
         """Create enhanced visualizations of missing data distributions."""
