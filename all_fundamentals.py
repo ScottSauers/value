@@ -398,11 +398,10 @@ def calculate_data_hash(data_file: Path) -> str:
 MAX_RETRIES = 3
 BASE_RETRY_DELAY = 1
 
-def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: CacheManager, progress_tracker: ProgressTracker) -> List[dict]:
+def process_ticker_batch(tickers: List[str], extractor: SECDataExtractor, cache_manager: CacheManager, progress_tracker: ProgressTracker) -> List[dict]:
     """Process a batch of tickers."""
     results = []
     completed_in_batch = 0
-    extractor = SECDataExtractor(str(output_dir))
 
     for ticker in tickers:
         try:
@@ -602,7 +601,7 @@ def parallel_process_tickers(
             future = executor.submit(
                 process_ticker_batch,
                 batch,
-                output_path,
+                extractor,
                 cache_manager,
                 progress_tracker
             )
