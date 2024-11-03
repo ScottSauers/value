@@ -410,7 +410,7 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
             cached_result = cache_manager.get_cached_result(ticker)
             if cached_result and cached_result['status'] == 'success':
                 concept_count = cached_result.get('concept_count', 0)
-                if concept_count >= SECDataExtractor.MIN_CONCEPT_THRESHOLD:
+                if concept_count >= cache_manager.MIN_CONCEPT_THRESHOLD:
                     # Sufficient concepts present, skip processing
                     results.append(cached_result)
                     completed_in_batch += 1
@@ -418,6 +418,7 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
                     continue
                 else:
                     # Insufficient concepts, proceed to fetch missing data
+                    self.logger.info(f"Ticker {ticker} has {concept_count} concepts. Proceeding to fetch missing data.")
                     pass  # Continue to processing below
 
             # Process ticker with retry only for rate limits
