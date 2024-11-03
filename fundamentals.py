@@ -409,8 +409,23 @@ class SECDataExtractor:
                     cached_memory = cached_data.memory_usage(deep=True).sum()
                     self.logger.info(f"Cached data size: {cached_data.shape}, Memory: {cached_memory/1024/1024:.2f}MB ({cached_memory/1024/1024/1024:.3f}GB)")
                     
-                    cached_data.reset_index(drop=True, inplace=True)
-                    result_df = pd.merge(result_df, cached_data, on='filing_date', how='left')
+                    # Deduplicate cached data by most recent filing
+                    cached_data = cached_data.sort_values('filing_date').groupby('filing_date').last().reset_index()
+                    
+                    # Set up indexes for efficient joining
+                    if 'filing_date' not in result_df.index.names:
+                        result_df = result_df.set_index('filing_date')
+                    cached_data = cached_data.set_index('filing_date')
+                    
+                    # Join using index (more efficient than merge)
+                    result_df = result_df.join(cached_data[[concept.tag]], how='left')
+                    
+                    # Reset index for next iteration
+                    result_df = result_df.reset_index()
+                    
+                    # Validate no row explosion occurred
+                    if len(result_df) > len(base_df) * 1.1:  # Allow 10% tolerance
+                        raise ValueError(f"Unexpected row multiplication for {concept.tag} in cached data")
                     
                     # Log after merge
                     memory_usage = result_df.memory_usage(deep=True).sum()
@@ -434,7 +449,23 @@ class SECDataExtractor:
                         api_memory = df.memory_usage(deep=True).sum()
                         self.logger.info(f"API data size: {df.shape}, Memory: {api_memory/1024/1024:.2f}MB ({api_memory/1024/1024/1024:.3f}GB)")
                         
-                        result_df = pd.merge(result_df, df, on='filing_date', how='left')
+                        # Deduplicate API data by most recent filing
+                        df = df.sort_values('filing_date').groupby('filing_date').last().reset_index()
+                        
+                        # Set up indexes for efficient joining
+                        if 'filing_date' not in result_df.index.names:
+                            result_df = result_df.set_index('filing_date')
+                        df = df.set_index('filing_date')
+                        
+                        # Join using index (more efficient than merge)
+                        result_df = result_df.join(df[[concept.tag]], how='left')
+                        
+                        # Reset index for next iteration 
+                        result_df = result_df.reset_index()
+                        
+                        # Validate no row explosion occurred
+                        if len(result_df) > len(base_df) * 1.1:  # Allow 10% tolerance
+                            raise ValueError(f"Unexpected row multiplication for {concept.tag} in API data")
                         self.cache_concept_data(ticker, concept, df)
                         
                         # Log after merge
