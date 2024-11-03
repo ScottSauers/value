@@ -134,7 +134,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
         futures = []
-        with tqdm(total=len(tickers), desc="Processing Tickers", unit="ticker") as pbar:
+        with tqdm(total=len(tickers), desc="Processing ", unit="tickers") as pbar:
             for i in range(0, len(tickers), BATCH_SIZE):
                 batch = tickers[i:i + BATCH_SIZE]
                 for ticker in batch:
