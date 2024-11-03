@@ -5,19 +5,35 @@ import finagg
 import logging
 import time
 from pathlib import Path
+from tqdm import tqdm
 
 # Configuration
 INPUT_FILE = 'small_cap_stocks_latest.csv'
 TICKER_COLUMN = 'ticker'
-USER_AGENT = 'useragent@email.com'  # Replace with a valid email
+USER_AGENT = 'useragent@email.com'  # Use a valid email
 OUTPUT_DIR = Path("./output")
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 CSV_PATH = OUTPUT_DIR / "company_xbrl_tags_summary.csv"
+NO_10K_CSV_PATH = OUTPUT_DIR / "no_10k_tickers.csv"
 FILING_TYPE = '10-K'
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Load existing data if available
+if CSV_PATH.exists():
+    existing_data = pd.read_csv(CSV_PATH, index_col=0)
+else:
+    existing_data = pd.DataFrame()
+
+if NO_10K_CSV_PATH.exists():
+    no_10k_data = pd.read_csv(NO_10K_CSV_PATH)
+    no_10k_tickers = set(no_10k_data[TICKER_COLUMN].unique())
+else:
+    no_10k_tickers = set()
+
+processed_tickers = set(existing_data.columns) | no_10k_tickers
 
 # Retrieve XBRL tags for a company's latest 10-K filing
 def get_xbrl_tags(cik: str) -> dict:
@@ -65,7 +81,7 @@ def get_xbrl_tags(cik: str) -> dict:
         # Collect and format tags by namespace
         tags = {}
         for element in root.iter():
-            namespace = element.tag.split('}')[0].strip('{')  # Extract namespace
+            namespace = element.tag.split('}')[0].strip('{')
             tag_name = element.tag.split('}')[1] if '}' in element.tag else element.tag
             if namespace not in tags:
                 tags[namespace] = []
@@ -86,17 +102,19 @@ def main():
     # Load tickers from input file
     try:
         tickers_df = pd.read_csv(INPUT_FILE)
-        tickers = tickers_df[TICKER_COLUMN].unique().tolist()
-        logger.info(f"Loaded {len(tickers)} tickers from {INPUT_FILE}")
+        tickers = [ticker for ticker in tickers_df[TICKER_COLUMN].unique() if ticker not in processed_tickers]
+        logger.info(f"Loaded {len(tickers)} tickers to process from {INPUT_FILE}")
     except Exception as e:
         logger.error(f"Error loading tickers from {INPUT_FILE}: {e}")
         return
 
-    all_data = []
-    for ticker in tickers:
+    # Placeholder for data collection
+    data_dict = {ticker: {} for ticker in tickers}
+    no_10k_count = 0
+
+    for ticker in tqdm(tickers, desc="Processing tickers"):
         logger.info(f"Processing {ticker}")
         try:
-            # Get CIK for ticker
             cik = finagg.sec.api.get_cik(ticker, user_agent=USER_AGENT)
         except Exception as e:
             logger.error(f"Error retrieving CIK for {ticker}: {e}")
@@ -108,33 +126,30 @@ def main():
 
         tags = get_xbrl_tags(cik)
         if tags:
-            # Flatten the dictionary to save in a DataFrame-friendly format
+            # Flatten and populate the data_dict with tags
             for namespace, tag_list in tags.items():
                 for tag in tag_list:
-                    all_data.append({
-                        'ticker': ticker,
-                        'cik': cik,
-                        'namespace': namespace,
-                        'tag': tag
-                    })
-            # Respect rate limits
-            time.sleep(0.11)
+                    data_dict[ticker][f"{namespace}:{tag}"] = 1  # Mark presence of tag for this ticker
+        else:
+            no_10k_count += 1
+            no_10k_tickers.add(ticker)
 
-    # Convert all_data to DataFrame and save
-    if all_data:
-        full_df = pd.DataFrame(all_data)
-        full_df.to_csv(CSV_PATH, index=False)
-        logger.info(f"Saved all data to {CSV_PATH}")
-    else:
-        logger.warning("No data was retrieved for any ticker.")
+            # Save to no_10k CSV after each ticker without 10-K found
+            pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
+            continue
 
-    # Print summary statistics if data is available
-    if all_data:
-        print("\nSummary Statistics:")
-        print(f"Total companies processed: {len(tickers)}")
-        print(f"Total tags extracted: {len(full_df)}")
-        print("Tags count per namespace:")
-        print(full_df['namespace'].value_counts())
+        # Save incremental progress to CSV for each ticker processed
+        pd.DataFrame.from_dict(data_dict, orient='index').fillna(0).T.to_csv(CSV_PATH)
+
+        # Pause to respect SEC rate limits
+        time.sleep(0.1)
+
+    # Final summary statistics
+    total_tickers = len(tickers)
+    percent_no_10k = (no_10k_count / total_tickers) * 100 if total_tickers > 0 else 0
+    logger.info(f"\nSummary Statistics:\nTotal companies processed: {total_tickers}\n"
+                f"No 10-K found for {no_10k_count} companies ({percent_no_10k:.2f}% of total)\n"
+                f"Results saved to {CSV_PATH}")
 
 if __name__ == "__main__":
     main()
