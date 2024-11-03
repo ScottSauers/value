@@ -9,6 +9,8 @@ from rich.console import Console
 from rich.table import Table
 from typing import Dict, List, Tuple
 import warnings
+import sqlite3
+
 warnings.filterwarnings('ignore')
 
 class SECDataQuality:
