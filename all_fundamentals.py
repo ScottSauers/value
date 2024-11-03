@@ -499,6 +499,27 @@ def parallel_process_tickers(
     
     # Get count of already processed tickers
     already_processed_count = cache_manager.get_processed_tickers_count()
+    
+    # Get specific tickers from cache for comparison
+    cached_tickers = set()
+    with sqlite3.connect(str(cache_manager.db_path)) as conn:
+        cursor = conn.execute('''
+            SELECT ticker FROM processed_tickers
+            WHERE status = 'success'
+            AND last_processed > datetime('now', '-7 days')
+        ''')
+        cached_tickers.update(row[0] for row in cursor.fetchall())
+    
+    # Compare input vs cache
+    input_tickers = set(tickers)
+    extra_cached = cached_tickers - input_tickers
+    missing_from_cache = input_tickers - cached_tickers
+    
+    if extra_cached:
+        logger.warning(f"Cache contains {len(extra_cached)} tickers not in input file: {sorted(extra_cached)}")
+    if missing_from_cache:
+        logger.info(f"Input file contains {len(missing_from_cache)} new tickers: {sorted(missing_from_cache)}")
+
     logger.info(f"📋 Found {len(tickers)} unique tickers to process "
                 f"({already_processed_count} already processed, "
                 f"{len(tickers) - already_processed_count} remaining)")
