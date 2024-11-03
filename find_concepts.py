@@ -6,8 +6,8 @@ import logging
 import time
 from pathlib import Path
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Semaphore
+from threading import Lock
+from collections import deque
 
 # Configuration
 INPUT_FILE = 'small_cap_stocks_latest.csv'
@@ -38,18 +38,35 @@ else:
 
 processed_tickers = set(existing_data.columns) | no_10k_tickers
 
-# Semaphore to control the rate limit across threads
-semaphore = Semaphore(MAX_REQUESTS_PER_SECOND)
+# Rate limiting mechanism
+lock = Lock()
+request_times = deque()
+
+def rate_limited_request(url, headers):
+    with lock:
+        current_time = time.time()
+        # Remove timestamps older than 1 second
+        while request_times and current_time - request_times[0] >= 1:
+            request_times.popleft()
+        # If we've reached the max requests per second, wait
+        if len(request_times) >= MAX_REQUESTS_PER_SECOND:
+            sleep_time = 1 - (current_time - request_times[0])
+            time.sleep(sleep_time)
+            current_time = time.time()
+            # Remove the timestamp we're now past
+            request_times.popleft()
+        request_times.append(current_time)
+    response = requests.get(url, headers=headers)
+    return response
 
 # Retrieve XBRL tags for a company's latest 10-K filing
 def get_xbrl_tags(cik: str) -> dict:
     try:
-        with semaphore:
-            search_url = f'https://data.sec.gov/submissions/CIK{cik}.json'
-            headers = {'User-Agent': USER_AGENT}
-            response = requests.get(search_url, headers=headers)
-            response.raise_for_status()
-            data = response.json()
+        search_url = f'https://data.sec.gov/submissions/CIK{cik}.json'
+        headers = {'User-Agent': USER_AGENT}
+        response = rate_limited_request(search_url, headers)
+        response.raise_for_status()
+        data = response.json()
 
         # Locate the most recent 10-K filing
         accession_number = None
@@ -65,10 +82,9 @@ def get_xbrl_tags(cik: str) -> dict:
         # Access the filing directory via `index.json`
         base_url = f'https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number}'
         index_url = f'{base_url}/index.json'
-        with semaphore:
-            response = requests.get(index_url, headers=headers)
-            response.raise_for_status()
-            index_data = response.json()
+        response = rate_limited_request(index_url, headers)
+        response.raise_for_status()
+        index_data = response.json()
 
         # Find primary XML instance document
         xbrl_url = None
@@ -82,10 +98,9 @@ def get_xbrl_tags(cik: str) -> dict:
             return None
 
         # Download and parse the XBRL instance document
-        with semaphore:
-            response = requests.get(xbrl_url, headers=headers)
-            response.raise_for_status()
-            root = ET.fromstring(response.content)
+        response = rate_limited_request(xbrl_url, headers)
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
 
         # Collect and format tags by namespace
         tags = {}
@@ -141,35 +156,30 @@ def main():
         logger.error(f"Error loading tickers from {INPUT_FILE}: {e}")
         return
 
-    all_data = {ticker: {} for ticker in tickers_to_process}
+    all_data = {}
     no_10k_count = 0
 
-    with ThreadPoolExecutor(max_workers=MAX_REQUESTS_PER_SECOND) as executor:
-        futures = []
-        with tqdm(total=to_process_count, desc="Processing Tickers", unit="ticker") as pbar:
-            for ticker in tickers_to_process:
-                futures.append(executor.submit(process_ticker, ticker))
-                # Pause to respect the rate limit
-                time.sleep(1 / MAX_REQUESTS_PER_SECOND)
+    with tqdm(total=to_process_count, desc="Processing Tickers", unit="ticker") as pbar:
+        for ticker in tickers_to_process:
+            ticker, cik, tags = process_ticker(ticker)
+            if ticker is None:
+                continue
 
-            for future in as_completed(futures):
-                ticker, cik, tags = future.result()
-                if ticker is None:
-                    continue
+            if tags is None:
+                no_10k_count += 1
+                no_10k_tickers.add(ticker)
+            else:
+                all_data[ticker] = {}
+                for namespace, tag_list in tags.items():
+                    for tag in tag_list:
+                        all_data[ticker][f"{namespace}:{tag}"] = 1
 
-                if tags is None:
-                    no_10k_count += 1
-                    no_10k_tickers.add(ticker)
-                else:
-                    for namespace, tag_list in tags.items():
-                        for tag in tag_list:
-                            all_data[ticker][f"{namespace}:{tag}"] = 1
+            pbar.update(1)
 
-                pbar.update(1)
-
-                # Save incremental results to prevent data loss
+            # Save incremental results to prevent data loss
+            if all_data:
                 pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T.to_csv(CSV_PATH)
-                pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
+            pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
 
     # Final summary statistics
     percent_no_10k = (no_10k_count / to_process_count) * 100 if to_process_count > 0 else 0
