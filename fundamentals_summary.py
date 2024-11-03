@@ -109,27 +109,31 @@ class SECDataQuality:
             self.console.print(table)
 
     def verify_data_consistency(self):
-        """Verify data consistency across different storage formats."""
+        """Verify data consistency across different storage formats, focusing only on numerical values."""
         with sqlite3.connect('data/fundamentals/cache/granular_cache.db') as conn:
-            # Check each concept
             for concept in self.data['concept_summary'].keys():
                 if concept in ['ticker', 'filing_date', 'units', 'taxonomy']:
                     continue
-                    
-                # Compare TSV files vs cache
-                tsv_count = len(list(Path('data/fundamentals').glob('*_sec_data_*.tsv')))
+    
+                # Count unique TSV files by grouping those with the same first 6 characters
+                unique_tsv_files = set()
+                for file in Path('data/fundamentals').glob('*_sec_data_*.tsv'):
+                    unique_tsv_files.add(file.name[:6])
+                unique_tsv_count = len(unique_tsv_files)
                 
+                # Query cache for numerical values only
                 cursor = conn.execute("""
                     SELECT COUNT(DISTINCT ticker) 
                     FROM concept_cache 
-                    WHERE concept_tag = ?
-                    AND concept_value IS NOT NULL
+                    WHERE concept_tag = ? 
+                    AND concept_value GLOB '-?[0-9]*\\.?[0-9]*'
                 """, (concept,))
-                cache_count = cursor.fetchone()[0]
-                
-                if abs(tsv_count - cache_count) > tsv_count * 0.1:  # 10% threshold
-                    self.console.print(f"[yellow]Warning: Data inconsistency for {concept}")
-                    self.console.print(f"TSV files: {tsv_count}, Cache records: {cache_count}")
+                numerical_cache_count = cursor.fetchone()[0]
+    
+                # Check for discrepancy with a threshold of 10%
+                if abs(unique_tsv_count - numerical_cache_count) > unique_tsv_count * 0.1:
+                    self.console.print(f"[yellow]Warning: Numerical data inconsistency for {concept}")
+                    self.console.print(f"Unique TSV files: {unique_tsv_count}, Numerical cache records: {numerical_cache_count}")
 
     def plot_na_distributions(self):
         """Create enhanced visualizations of missing data distributions."""
