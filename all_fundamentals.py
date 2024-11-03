@@ -5,8 +5,7 @@ import concurrent.futures
 import pandas as pd
 from pathlib import Path
 import logging
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional, Dict, Tuple
 import finagg
 from dotenv import load_dotenv
@@ -126,19 +125,24 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
     for ticker in tickers:
         try:
             # Retrieve cached result
-            cached_result = cache_manager.get_cached_result(ticker)
-            if cached_result and cached_result['status'] == 'success':
-                concept_count = cached_result.get('concept_count', 0)
+            cached_result = cache_manager.get_cached_concept(ticker, SECConcept(ticker))
+            if cached_result is not None:
+                concept_count = len(cached_result)
                 if concept_count >= cache_manager.MIN_CONCEPT_THRESHOLD:
                     # Sufficient concepts present, skip processing
-                    results.append(cached_result)
+                    results.append({
+                        'ticker': ticker,
+                        'status': 'cached',
+                        'data_file': "Cached",
+                        'metadata_file': "Cached"
+                    })
                     completed_in_batch += 1
-                    progress_tracker.update_progress(completed=None, batch_completed=completed_in_batch)
+                    progress_tracker.update_progress(None, completed_in_batch)
                     continue
                 else:
                     # Insufficient concepts, proceed to fetch missing data
                     cache_manager.logger.info(f"Ticker {ticker} has {concept_count} concepts. Proceeding to fetch missing data.")
-            
+    
             # Process ticker with retry only for rate limits
             for attempt in range(MAX_RETRIES):
                 try:
@@ -159,13 +163,13 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
                             'metadata_file': str(metadata_file)
                         }
                     
-                    cache_manager.cache_result(ticker, result)
+                    cache_manager.cache_concept_data(ticker, SECConcept(ticker), pd.DataFrame())
                     results.append(result)
                     break
 
                 except Exception as e:
                     if "429" in str(e) or "Too Many Requests" in str(e):
-                        if attempt < MAX_RETRY - 1:
+                        if attempt < MAX_RETRIES - 1:
                             delay = BASE_RETRY_DELAY * (2 ** attempt)
                             cache_manager.logger.warning(
                                 f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
@@ -181,12 +185,12 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
                 'status': 'failed', 
                 'error': str(e)
             }
-            cache_manager.cache_result(ticker, error_result)
+            cache_manager.cache_concept_error(ticker, SECConcept(ticker), str(e))
             results.append(error_result)
             cache_manager.logger.error(f"Failed to process {ticker}: {str(e)}")
 
         completed_in_batch += 1
-        progress_tracker.update_progress(completed=None, batch_completed=completed_in_batch)
+        progress_tracker.update_progress(None, completed_in_batch)
 
     return results
 
@@ -209,7 +213,7 @@ def parallel_process_tickers(
     
     # Initialize CacheManager
     cache_manager = CacheManager(output_path / 'cache')
-    cache_manager.cleanup_old_entries()
+    cache_manager.resync_ticker_cache()
     
     # Initialize ProgressTracker
     progress_tracker = ProgressTracker()
@@ -244,26 +248,6 @@ def parallel_process_tickers(
     # Get count of already processed tickers
     already_processed_count = cache_manager.get_processed_tickers_count()
     
-    # Get specific tickers from cache for comparison
-    cached_tickers = set()
-    with sqlite3.connect(str(cache_manager.db_path)) as conn:
-        cursor = conn.execute('''
-            SELECT ticker FROM processed_tickers
-            WHERE status = 'success'
-            AND last_processed > datetime("now", "-7 days")
-        ''')
-        cached_tickers.update(row[0] for row in cursor.fetchall())
-    
-    # Compare input vs cache
-    input_tickers = set(tickers)
-    extra_cached = cached_tickers - input_tickers
-    missing_from_cache = input_tickers - cached_tickers
-    
-    if extra_cached:
-        logger.warning(f"Cache contains {len(extra_cached)} tickers not in input file: {sorted(extra_cached)}")
-    if missing_from_cache:
-        logger.info(f"Input file contains {len(missing_from_cache)} new tickers: {sorted(missing_from_cache)}")
-
     logger.info(f"📋 Found {len(tickers)} unique tickers to process "
                 f"({already_processed_count} already processed, "
                 f"{len(tickers) - already_processed_count} remaining)")
@@ -282,13 +266,6 @@ def parallel_process_tickers(
     MAX_CONCURRENT_BATCHES = min(4, max_workers if max_workers else 4)
     active_futures = set()
     
-    def save_batch_results(batch_results, batch_num):
-        batch_df = pd.DataFrame(batch_results)
-        batch_file = output_path / f'batch_results_{batch_id}_part{batch_num}.csv'
-        batch_df.to_csv(batch_file, index=False)
-        logger.info(f"Batch {batch_num} results saved to {batch_file}")
-        return []
-    
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for batch_num, batch in enumerate(ticker_batches, start=1):
             # Wait if too many active futures
@@ -306,7 +283,11 @@ def parallel_process_tickers(
                         
                         # Save and clear results periodically
                         if len(results) > 1000:
-                            results = save_batch_results(results, batch_num)
+                            batch_results = results.copy()
+                            results.clear()
+                            batch_file = output_path / f'batch_results_{batch_id}_part{batch_num}.csv'
+                            pd.DataFrame(batch_results).to_csv(batch_file, index=False)
+                            logger.info(f"Batch {batch_num} results saved to {batch_file}")
                     except Exception as e:
                         logger.error(f"Batch processing error: {str(e)}")
             
@@ -317,8 +298,14 @@ def parallel_process_tickers(
                 # Wait for all current batches to complete
                 concurrent.futures.wait(active_futures)
                 # Save remaining results
-                batch_results = [future.result() for future in active_futures if future.done()]
-                results.extend(batch_results)
+                for future in active_futures:
+                    try:
+                        batch_results = future.result()
+                        results.extend(batch_results)
+                        completed_total += len(batch_results)
+                        progress_tracker.update_progress(completed=None, batch_completed=completed_total)
+                    except Exception as e:
+                        logger.error(f"Batch processing error: {str(e)}")
                 active_futures.clear()
                 gc.collect()
             
@@ -332,30 +319,30 @@ def parallel_process_tickers(
             )
             active_futures.add(future)
     
-        # Wait for remaining futures
-        remaining_futures = list(active_futures)
-        while remaining_futures:
-            done, remaining_futures = concurrent.futures.wait(
-                remaining_futures, 
-                timeout=10.0,  # 10 second timeout
-                return_when=concurrent.futures.FIRST_COMPLETED
-            )
-            for future in done:
-                try:
-                    batch_results = future.result(timeout=5.0)  # 5 second timeout
-                    results.extend(batch_results)
-                    completed_total += len(batch_results)
-                    progress_tracker.update_progress(completed=None, batch_completed=completed_total)
-                except concurrent.futures.TimeoutError:
-                    logger.error("Timeout waiting for batch results")
-                    # Cancel the future if possible
-                    future.cancel()
-                except Exception as e:
-                    logger.error(f"Batch processing error: {str(e)}")
-            
-            # Force cleanup
-            gc.collect()
-    
+    # Wait for remaining futures
+    remaining_futures = list(active_futures)
+    while remaining_futures:
+        done, remaining_futures = concurrent.futures.wait(
+            remaining_futures, 
+            timeout=10.0,  # 10 second timeout
+            return_when=concurrent.futures.FIRST_COMPLETED
+        )
+        for future in done:
+            try:
+                batch_results = future.result(timeout=5.0)  # 5 second timeout
+                results.extend(batch_results)
+                completed_total += len(batch_results)
+                progress_tracker.update_progress(completed=None, batch_completed=completed_total)
+            except concurrent.futures.TimeoutError:
+                logger.error("Timeout waiting for batch results")
+                # Cancel the future if possible
+                future.cancel()
+            except Exception as e:
+                logger.error(f"Batch processing error: {str(e)}")
+        
+        # Force cleanup
+        gc.collect()
+
     # Complete progress tracking
     progress_tracker.finish()
     gc.collect()
@@ -375,14 +362,28 @@ def parallel_process_tickers(
     
     # Save batch statistics
     batch_stats = {
+        'batch_id': batch_id,
         'start_time': start_time.isoformat(),
         'end_time': end_time.isoformat(),
         'total_tickers': len(final_results_df),
         'successful': success_count,
         'failed': fail_count
     }
-    cache_manager.save_batch_stats(batch_id, batch_stats)
-    
+    with cache_manager.conn:
+        cache_manager.conn.execute('''
+            INSERT OR REPLACE INTO processing_stats 
+            (batch_id, start_time, end_time, total_tickers, successful, failed)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            batch_stats['batch_id'],
+            batch_stats['start_time'],
+            batch_stats['end_time'],
+            batch_stats['total_tickers'],
+            batch_stats['successful'],
+            batch_stats['failed']
+        ))
+    logger.info("Batch statistics saved.")
+
     # Print final summary
     logger.info("\n📋 Processing Summary:")
     logger.info(f"Total tickers processed: {len(final_results_df)}")
@@ -391,22 +392,55 @@ def parallel_process_tickers(
     logger.info(f"⏱️ Total time: {end_time - start_time}")
     logger.info(f"📁 Summary saved to: {summary_file}")
     
-    # Display final summary with rich formatting
-    success_rate = (success_count / len(final_results_df)) * 100 if len(final_results_df) > 0 else 0
-    console = Console()
-    console.print("\n[bold green]✨ Processing Complete![/bold green]")
-    console.print("\n[bold]Final Statistics:[/bold]")
-    console.print(f"📊 Success Rate: [green]{success_rate:.1f}%[/green]")
-    console.print(f"📁 Output Directory: [blue]{OUTPUT_DIR}[/blue]")
+    return final_results_df
+
+def main():
+    """Main execution function with configuration."""
+    # Configuration
+    INPUT_FILE = 'small_cap_stocks_latest.csv'
+    OUTPUT_DIR = './data/fundamentals'
+    MAX_WORKERS = 8
+    TICKER_COLUMN = 'ticker'
+    BATCH_SIZE = 16
     
-    # Display error summary if there were failures
-    if fail_count > 0:
-        failed_results = final_results_df[final_results_df['status'] == 'failed']
-        console.print("\n[bold red]⚠️ Failed Tickers:[/bold red]")
-        for _, row in failed_results.iterrows():
-            console.print(f"❌ {row['ticker']}: {row['error']}")
-            
-    console.print("\n[bold green]🎉 Process completed successfully![/bold green]\n")
+    try:
+        console = Console()
+        console.print("\n[bold blue]🚀 Starting SEC Data Processing[/bold blue]\n")
+        
+        results = parallel_process_tickers(
+            input_file=INPUT_FILE,
+            output_dir=OUTPUT_DIR,
+            max_workers=MAX_WORKERS,
+            ticker_column=TICKER_COLUMN,
+            batch_size=BATCH_SIZE
+        )
+        
+        # Calculate success rate
+        success_rate = (len(results[results['status'] == 'success']) / len(results)) * 100 if len(results) > 0 else 0
+        
+        # Display final summary with rich formatting
+        console.print("\n[bold green]✨ Processing Complete![/bold green]")
+        console.print("\n[bold]Final Statistics:[/bold]")
+        console.print(f"📊 Success Rate: [green]{success_rate:.1f}%[/green]")
+        console.print(f"📁 Output Directory: [blue]{OUTPUT_DIR}[/blue]")
+        
+        # Display error summary if there were failures
+        failed_results = results[results['status'] == 'failed']
+        if not failed_results.empty:
+            console.print("\n[bold red]⚠️ Failed Tickers:[/bold red]")
+            for _, row in failed_results.iterrows():
+                console.print(f"❌ {row['ticker']}: {row['error']}")
+                
+        console.print("\n[bold green]🎉 Process completed successfully![/bold green]\n")
+        
+    except KeyboardInterrupt:
+        console.print("\n[bold red]⚠️ Process interrupted by user[/bold red]")
+        sys.exit(1)
+    except Exception as e:
+        console = Console()
+        console.print(f"\n[bold red]❌ Fatal error: {str(e)}[/bold red]")
+        console.print_exception()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
