@@ -354,9 +354,9 @@ class SECDataExtractor:
        for concept in concepts:
            try:
                cached_data = self.get_cached_concept(ticker, concept)
-                if cached_data is not None and not cached_data.empty:
-                    all_dates.update(cached_data['filing_date'])
-                    valid_concepts.append(concept)
+               if cached_data is not None and not cached_data.empty and concept.tag in cached_data.columns:
+                   self.logger.info(f"Using cached data for {ticker} {concept.tag}")
+                   self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
                    
                    # Log incoming cached data size
                    cached_memory = cached_data.memory_usage(deep=True).sum()
@@ -377,8 +377,8 @@ class SECDataExtractor:
                    units=concept.units
                )
                
-               if df is not None and not df.empty:
-                   if 'value' in df.columns and df['value'].iloc[0] != 'N/A':
+               if df is not None and not df.empty and 'value' in df.columns:
+                   if df['value'].iloc[0] != 'N/A':
                        df = finagg.sec.api.filter_original_filings(df)
                        df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
                        df = df[['filing_date', concept.tag]]
