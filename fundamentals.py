@@ -372,13 +372,14 @@ class SECDataExtractor:
         result_df = base_df
         for batch_idx, concept_batch in enumerate(concept_batches, 1):
             self.logger.info(f"Processing concept batch {batch_idx}/{len(concept_batches)}")
-            result_df = self.process_concept_batch(concept_batch, result_df)  # Add self.
+            result_df = self.process_concept_batch(concepts=concept_batch, base_df=result_df, ticker=ticker)
             gc.collect()
         
         result_df = result_df.sort_values('filing_date', ascending=False)
         result_df = result_df.drop_duplicates(subset='filing_date')
         
         return result_df
+
 
     def process_concept_batch(self, concepts: List[SECConcept], base_df: pd.DataFrame, ticker: str) -> pd.DataFrame:
         """Process a batch of concepts for a given ticker.
