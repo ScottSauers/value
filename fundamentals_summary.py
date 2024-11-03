@@ -41,9 +41,11 @@ class SECDataQuality:
             partial_na_pct = stats.get('partial_na_percentage', 0)
             has_data_pct = 100 - missing_pct
             
+            # Identify missing data by checking NA percentages
             tickers_no_data = []
             for ticker, ticker_stats in self.data['ticker_summary'].items():
-                if concept in self.data['missing_data'].get(ticker, []):
+                na_percentages = ticker_stats.get('missing_concepts', 0)
+                if na_percentages > 0:
                     tickers_no_data.append(ticker)
             
             results[concept] = {
@@ -122,10 +124,62 @@ class SECDataQuality:
         self.console.print(f"Companies with Zero Coverage: {zero_coverage} ({zero_coverage/total_companies*100:.1f}%)")
         self.console.print(f"Mean Coverage: {coverage_stats['mean']:.2f} years")
         self.console.print(f"Median Coverage: {coverage_stats['median']:.2f} years")
-        self.console.print(f"Coverage Range: {coverage_stats['min']:.1f} to {coverage_stats['max']:.1f} years")
+        self.console.print(f"Coverage Range: {coverage_stats['min']:.1f} to {coverage_stats['max']:.1f} years\n")
+
+        # Additional Coverage Statistics
+        coverage_years = [stats.get('years_coverage', 0) for stats in self.data['ticker_summary'].values()]
+        self.console.print("[bold]Detailed Coverage Statistics[/bold]")
+        self.console.print(f"Companies with >10 years coverage: "
+                         f"{sum(1 for y in coverage_years if y > 10)} "
+                         f"({sum(1 for y in coverage_years if y > 10)/total_companies*100:.1f}%)")
+        self.console.print(f"Companies with >5 years coverage: "
+                         f"{sum(1 for y in coverage_years if y > 5)} "
+                         f"({sum(1 for y in coverage_years if y > 5)/total_companies*100:.1f}%)")
+        self.console.print(f"Companies with <1 year coverage: "
+                         f"{sum(1 for y in coverage_years if y < 1)} "
+                         f"({sum(1 for y in coverage_years if y < 1)/total_companies*100:.1f}%)\n")
+
+        # Missing Data Statistics
+        na_percentages = [stats.get('average_na_percentage', 0) for stats in self.data['ticker_summary'].values()]
+        self.console.print("[bold]Missing Data Overview[/bold]")
+        self.console.print(f"Average missing data across all companies: {np.mean(na_percentages):.1f}%")
+        self.console.print(f"Median missing data across all companies: {np.median(na_percentages):.1f}%")
+        self.console.print(f"Companies with >90% missing data: "
+                         f"{sum(1 for p in na_percentages if p > 90)} "
+                         f"({sum(1 for p in na_percentages if p > 90)/total_companies*100:.1f}%)")
+        self.console.print(f"Companies with <50% missing data: "
+                         f"{sum(1 for p in na_percentages if p < 50)} "
+                         f"({sum(1 for p in na_percentages if p < 50)/total_companies*100:.1f}%)\n")
+
+        # Data Quality Distribution
+        self.console.print("[bold]Data Quality Distribution[/bold]")
+        quality_ranges = [
+            (0, 25, "Excellent"),
+            (25, 50, "Good"),
+            (50, 75, "Fair"),
+            (75, 90, "Poor"),
+            (90, 100, "Very Poor")
+        ]
+        
+        for low, high, label in quality_ranges:
+            count = sum(1 for p in na_percentages if low <= p < high)
+            self.console.print(f"{label} ({low}-{high}% missing): {count} companies "
+                             f"({count/total_companies*100:.1f}%)")
         
         # Concept Coverage Analysis
         concept_analysis = self.analyze_concept_coverage()
+        
+        # Calculate concept coverage statistics
+        total_concepts = len([c for c in concept_analysis.keys() 
+                            if c not in ['ticker', 'filing_date', 'units', 'taxonomy']])
+        concepts_well_covered = sum(1 for c, stats in concept_analysis.items() 
+                                  if stats['companies_with_data_pct'] > 50 
+                                  and c not in ['ticker', 'filing_date', 'units', 'taxonomy'])
+        
+        self.console.print(f"\n[bold]Concept Coverage Overview[/bold]")
+        self.console.print(f"Total concepts tracked: {total_concepts}")
+        self.console.print(f"Concepts with >50% company coverage: {concepts_well_covered} "
+                         f"({concepts_well_covered/total_concepts*100:.1f}%)")
         
         table = Table(title="Concept Data Availability")
         table.add_column("Concept", style="cyan")
@@ -154,29 +208,32 @@ class SECDataQuality:
         self.console.print("\n")
         self.console.print(table)
         
-        # Company Data Quality
+        # Company Data Quality Analysis
         company_quality = []
         for ticker, stats in self.data['ticker_summary'].items():
             company_quality.append({
                 'ticker': ticker,
                 'avg_na_pct': stats.get('average_na_percentage', 0),
-                'years_coverage': stats.get('years_coverage', 0)
+                'years_coverage': stats.get('years_coverage', 0),
+                'missing_concepts': stats.get('missing_concepts', 0)
             })
         
         company_quality.sort(key=lambda x: (x['avg_na_pct'], -x['years_coverage']))
         
         # Best and worst companies table
-        quality_table = Table(title="Data Quality by Company")
+        quality_table = Table(title="Companies with Most Complete Data")
         quality_table.add_column("Ticker")
         quality_table.add_column("Missing Data %", justify="right")
         quality_table.add_column("Years Coverage", justify="right")
+        quality_table.add_column("Missing Concepts", justify="right")
         
-        self.console.print("\n[bold]Companies with Most Complete Data[/bold]")
+        self.console.print("\n[bold]High Quality Data Companies[/bold]")
         for company in company_quality[:15]:
             quality_table.add_row(
                 company['ticker'],
                 f"{company['avg_na_pct']:.1f}%",
-                f"{company['years_coverage']:.1f}"
+                f"{company['years_coverage']:.1f}",
+                str(company['missing_concepts'])
             )
         
         self.console.print(quality_table)
@@ -186,16 +243,27 @@ class SECDataQuality:
         poor_quality_table.add_column("Ticker")
         poor_quality_table.add_column("Missing Data %", justify="right")
         poor_quality_table.add_column("Years Coverage", justify="right")
+        poor_quality_table.add_column("Missing Concepts", justify="right")
         
         for company in company_quality[-15:]:
             poor_quality_table.add_row(
                 company['ticker'],
                 f"{company['avg_na_pct']:.1f}%",
-                f"{company['years_coverage']:.1f}"
+                f"{company['years_coverage']:.1f}",
+                str(company['missing_concepts'])
             )
         
         self.console.print("\n")
         self.console.print(poor_quality_table)
+
+        # Data Age Analysis
+        recent_data = {ticker: stats for ticker, stats in self.data['ticker_summary'].items()
+                      if stats.get('years_coverage', 0) > 0}
+        if recent_data:
+            self.console.print("\n[bold]Data Recency Analysis[/bold]")
+            active_companies = len(recent_data)
+            self.console.print(f"Companies with recent data: {active_companies} "
+                             f"({active_companies/total_companies*100:.1f}%)")
 
         # Generate missing data plots
         self.plot_na_distributions()
