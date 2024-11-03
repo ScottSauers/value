@@ -129,19 +129,25 @@ def main():
     # Load tickers from input file
     try:
         tickers_df = pd.read_csv(INPUT_FILE)
-        tickers = [ticker for ticker in tickers_df[TICKER_COLUMN].unique() if ticker not in processed_tickers]
-        logger.info(f"Loaded {len(tickers)} tickers to process from {INPUT_FILE}")
+        all_tickers = set(tickers_df[TICKER_COLUMN].unique())
+        tickers_to_process = all_tickers - processed_tickers
+        cached_count = len(processed_tickers)
+        to_process_count = len(tickers_to_process)
+
+        logger.info(f"Total tickers: {len(all_tickers)}")
+        logger.info(f"Already cached tickers: {cached_count} ({(cached_count / len(all_tickers)) * 100:.2f}%)")
+        logger.info(f"Tickers to process: {to_process_count} ({(to_process_count / len(all_tickers)) * 100:.2f}%)")
     except Exception as e:
         logger.error(f"Error loading tickers from {INPUT_FILE}: {e}")
         return
 
-    all_data = {ticker: {} for ticker in tickers}
+    all_data = {ticker: {} for ticker in tickers_to_process}
     no_10k_count = 0
 
     with ThreadPoolExecutor(max_workers=MAX_REQUESTS_PER_SECOND) as executor:
         futures = []
-        with tqdm(total=len(tickers), desc="Processing Tickers", unit="ticker") as pbar:
-            for ticker in tickers:
+        with tqdm(total=to_process_count, desc="Processing Tickers", unit="ticker") as pbar:
+            for ticker in tickers_to_process:
                 futures.append(executor.submit(process_ticker, ticker))
                 # Pause to respect the rate limit
                 time.sleep(1 / MAX_REQUESTS_PER_SECOND)
@@ -166,9 +172,8 @@ def main():
                 pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
 
     # Final summary statistics
-    total_tickers = len(tickers)
-    percent_no_10k = (no_10k_count / total_tickers) * 100 if total_tickers > 0 else 0
-    logger.info(f"\nSummary Statistics:\nTotal companies processed: {total_tickers}\n"
+    percent_no_10k = (no_10k_count / to_process_count) * 100 if to_process_count > 0 else 0
+    logger.info(f"\nSummary Statistics:\nTotal tickers processed: {to_process_count}\n"
                 f"No 10-K found for {no_10k_count} companies ({percent_no_10k:.2f}% of total)\n"
                 f"Results saved to {CSV_PATH}")
 
