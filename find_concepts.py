@@ -12,7 +12,7 @@ from collections import deque
 # Configuration
 INPUT_FILE = 'small_cap_stocks_latest.csv'
 TICKER_COLUMN = 'ticker'
-USER_AGENT = 'useragent@email.com'  # Replace with a valid email
+USER_AGENT = 'useragent@gmail.com'  # Replace with a valid email
 OUTPUT_DIR = Path("./output")
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 CSV_PATH = OUTPUT_DIR / "company_xbrl_tags_summary.csv"
