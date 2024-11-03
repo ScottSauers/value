@@ -344,70 +344,80 @@ class SECDataExtractor:
                     df[col] = pd.to_numeric(df[col], downcast='integer')
             return df
         
-    def process_concept_batch(concepts: List[SECConcept], base_df: pd.DataFrame) -> pd.DataFrame:
-        result_df = base_df.copy()
+        def process_concept_batch(concepts: List[SECConcept], base_df: pd.DataFrame) -> pd.DataFrame:
+            result_df = base_df.copy()
+            
+            for concept in concepts:
+                try:
+                    cached_data = self.get_cached_concept(ticker, concept)
+                    if cached_data is not None and not cached_data.empty:
+                        self.logger.info(f"Using cached data for {ticker} {concept.tag}")
+                        self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
+                        cached_data.reset_index(drop=True, inplace=True)
+                        result_df = pd.merge(result_df, cached_data, on='filing_date', how='left')
+                        continue
+    
+                    df = self.rate_limited_get(
+                        tag=concept.tag,
+                        ticker=ticker,
+                        taxonomy=concept.taxonomy,
+                        units=concept.units
+                    )
+                    
+                    if df is not None and not df.empty:
+                        if 'value' in df.columns and df['value'].iloc[0] != 'N/A':
+                            df = finagg.sec.api.filter_original_filings(df)
+                            df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
+                            df = df[['filing_date', concept.tag]]
+                            result_df = pd.merge(result_df, cached_data, on='filing_date', how='left')
+                            self.cache_concept_data(ticker, concept, df)
+                        else:
+                            self.logger.info(f"No data available for {concept.tag} and {ticker}")
+                            self.cache_concept_data(ticker, concept, df)
+                    
+                except Exception as e:
+                    self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
+                    self.cache_concept_error(ticker, concept, str(e))
+                
+                gc.collect()
+            
+            return result_df
         
-        for concept in concepts:
+        # Get all unique dates first
+        all_dates = set()
+        valid_concepts = []  # Track concepts with valid data
+        for concept in self.SEC_CONCEPTS:
             try:
                 cached_data = self.get_cached_concept(ticker, concept)
                 if cached_data is not None and not cached_data.empty:
-                    self.logger.info(f"Using cached data for {ticker} {concept.tag}")
-                    self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
-                    
-                    # Ensure proper date formatting
-                    cached_data['filing_date'] = pd.to_datetime(cached_data['filing_date']).dt.date
-                    result_df['filing_date'] = pd.to_datetime(result_df['filing_date']).dt.date
-                    
-                    # Merge with proper alignment
-                    result_df = pd.merge(
-                        result_df, 
-                        cached_data,
-                        on='filing_date',
-                        how='outer'
-                    )
-                    
-                    # Drop duplicates to prevent exponential growth
-                    result_df = result_df.drop_duplicates(subset='filing_date')
-                    
-                    self.logger.info(f"DataFrame size after merge: {result_df.shape}")
-                    memory_usage = result_df.memory_usage(deep=True).sum() / 1024 / 1024
-                    self.logger.info(f"Memory usage: {memory_usage:.2f} MB")
-                    continue
-    
-                df = self.rate_limited_get(
-                    tag=concept.tag,
-                    ticker=ticker,
-                    taxonomy=concept.taxonomy,
-                    units=concept.units
-                )
-                
-                if df is not None and not df.empty:
-                    if 'value' in df.columns and df['value'].iloc[0] != 'N/A':
-                        df = finagg.sec.api.filter_original_filings(df)
-                        df = df.rename(columns={'value': concept.tag, 'end': 'filing_date'})
-                        df['filing_date'] = pd.to_datetime(df['filing_date']).dt.date
-                        df = df[['filing_date', concept.tag]]
-                        
-                        # Same merge process as above
-                        result_df = pd.merge(
-                            result_df, 
-                            df,
-                            on='filing_date',
-                            how='outer'
-                        )
-                        result_df = result_df.drop_duplicates(subset='filing_date')
-                        
-                        self.cache_concept_data(ticker, concept, df)
-                        self.logger.info(f"DataFrame size after merge: {result_df.shape}")
-                        memory_usage = result_df.memory_usage(deep=True).sum() / 1024 / 1024
-                        self.logger.info(f"Memory usage: {memory_usage:.2f} MB")
-                    else:
-                        self.logger.info(f"No data available for {concept.tag} and {ticker}")
-                        self.cache_concept_data(ticker, concept, df)
-                        
-            except Exception as e:
-                self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
-                self.cache_concept_error(ticker, concept, str(e))
+                    all_dates.update(cached_data['filing_date'])
+                    if not all(cached_data[concept.tag] == 'N/A'):
+                        valid_concepts.append(concept)
+            except Exception:
+                continue
+        
+        if not all_dates or not valid_concepts:
+            self.logger.warning(f"No SEC data found for {ticker}")
+            return pd.DataFrame()
+        
+        # Create base dataframe
+        base_df = pd.DataFrame({'filing_date': sorted(list(all_dates))})
+        base_df = optimize_df(base_df)
+        
+        # Process in smaller chunks
+        concept_batches = [
+            valid_concepts[i:i + CHUNK_SIZE] 
+            for i in range(0, len(valid_concepts), CHUNK_SIZE)
+        ]
+        
+        result_df = base_df
+        for batch_idx, concept_batch in enumerate(concept_batches, 1):
+            self.logger.info(f"Processing concept batch {batch_idx}/{len(concept_batches)}")
+            result_df = process_concept_batch(concept_batch, result_df)
+            gc.collect()
+        
+        result_df = result_df.sort_values('filing_date', ascending=False)
+        result_df = result_df.drop_duplicates(subset='filing_date')
         
         return result_df
 
