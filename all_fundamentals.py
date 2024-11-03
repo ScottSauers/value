@@ -203,12 +203,12 @@ class CacheManager:
                             GROUP BY ticker 
                             HAVING COUNT(DISTINCT concept_tag) >= ?
                         )
-                    ''', (SECDataExtractor.MIN_CONCEPT_THRESHOLD,))
+                    ''', (self.MIN_CONCEPT_THRESHOLD,))
                     concept_count = cursor.fetchone()[0]
             else:
                 concept_count = 0
         except Exception as e:
-            print(f"Warning: Error checking concept cache: {e}")
+            self.logger.warning(f"Error checking concept cache: {e}")
             concept_count = 0
     
         return max(ticker_count, concept_count)
