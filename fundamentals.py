@@ -69,8 +69,10 @@ class SECDataExtractor:
                 ''')
                 
                 conn.commit()
+                self.logger.info("Initialized granular_cache.db with concept_cache and concept_status tables.")
             except Exception as e:
                 conn.rollback()
+                self.logger.error(f"Error initializing granular_cache.db: {e}")
                 raise
     
     # Comprehensive list of SEC concepts to collect
