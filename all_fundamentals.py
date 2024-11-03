@@ -133,9 +133,9 @@ class CacheManager:
                 DELETE FROM processed_tickers 
                 WHERE last_processed < datetime('now', '-7 days')
             ''')
-    
+
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
-        """Retrieve cached result for a ticker if it exists and is recent."""
+        """Retrieve cached result for a ticker if it exists and is recent, along with concept count."""
         with self._lock:
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.execute('''
@@ -143,8 +143,17 @@ class CacheManager:
                     WHERE ticker = ? AND last_processed > datetime("now", "-7 days")
                 ''', (ticker,))
                 result = cursor.fetchone()
-    
+
                 if result:
+                    # Count the number of concepts present for this ticker
+                    concept_count_cursor = conn.execute('''
+                        SELECT COUNT(DISTINCT concept_tag) 
+                        FROM concept_cache 
+                        WHERE ticker = ? 
+                          AND last_updated > datetime("now", "-7 days")
+                    ''', (ticker,))
+                    concept_count = concept_count_cursor.fetchone()[0] if concept_count_cursor else 0
+
                     return {
                         'ticker': result[0],
                         'last_processed': result[1],
@@ -152,9 +161,10 @@ class CacheManager:
                         'data_file': result[3],
                         'metadata_file': result[4],
                         'error': result[5],
-                        'data_hash': result[6]
+                        'data_hash': result[6],
+                        'concept_count': concept_count
                     }
-    
+
                 # If not found, mark as processing
                 conn.execute('''
                     INSERT OR REPLACE INTO processed_tickers 
