@@ -134,31 +134,34 @@ def main():
 
     with ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
         futures = []
-        for i in range(0, len(tickers), BATCH_SIZE):
-            batch = tickers[i:i + BATCH_SIZE]
-            for ticker in batch:
-                futures.append(executor.submit(process_ticker, ticker))
+        with tqdm(total=len(tickers), desc="Processing Tickers", unit="ticker") as pbar:
+            for i in range(0, len(tickers), BATCH_SIZE):
+                batch = tickers[i:i + BATCH_SIZE]
+                for ticker in batch:
+                    futures.append(executor.submit(process_ticker, ticker))
 
-            # Wait for the batch to complete and apply the rate limit
-            for future in as_completed(futures):
-                ticker, cik, tags = future.result()
-                if ticker is None:
-                    continue
+                # Wait for the batch to complete and apply the rate limit
+                for future in as_completed(futures):
+                    ticker, cik, tags = future.result()
+                    if ticker is None:
+                        continue
 
-                if tags is None:
-                    no_10k_count += 1
-                    no_10k_tickers.add(ticker)
-                else:
-                    for namespace, tag_list in tags.items():
-                        for tag in tag_list:
-                            all_data[ticker][f"{namespace}:{tag}"] = 1
+                    if tags is None:
+                        no_10k_count += 1
+                        no_10k_tickers.add(ticker)
+                    else:
+                        for namespace, tag_list in tags.items():
+                            for tag in tag_list:
+                                all_data[ticker][f"{namespace}:{tag}"] = 1
 
-            # Save incremental results to prevent data loss
-            pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T.to_csv(CSV_PATH)
-            pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
+                    pbar.update(1)  # Update progress bar after each completed future
 
-            # Pause to respect the rate limit
-            time.sleep(1)  # Limit to max 10 requests per second by pausing 1 sec after each batch
+                # Save incremental results to prevent data loss
+                pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T.to_csv(CSV_PATH)
+                pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
+
+                # Pause to respect the rate limit
+                time.sleep(1)  # Limit to max 10 requests per second by pausing 1 sec after each batch
 
     # Final summary statistics
     total_tickers = len(tickers)
@@ -166,6 +169,13 @@ def main():
     logger.info(f"\nSummary Statistics:\nTotal companies processed: {total_tickers}\n"
                 f"No 10-K found for {no_10k_count} companies ({percent_no_10k:.2f}% of total)\n"
                 f"Results saved to {CSV_PATH}")
+
+    if all_data:
+        final_data = pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T
+        print("\nNamespace Tags Summary:")
+        for ticker in final_data.columns:
+            concept_count = final_data[ticker].sum()
+            logger.info(f"Ticker: {ticker}, Total Concepts Extracted: {int(concept_count)}")
 
 if __name__ == "__main__":
     main()
