@@ -354,9 +354,9 @@ class SECDataExtractor:
        for concept in concepts:
            try:
                cached_data = self.get_cached_concept(ticker, concept)
-               if cached_data is not None and not cached_data.empty:
-                   self.logger.info(f"Using cached data for {ticker} {concept.tag}")
-                   self.logger.info(f"Retrieved shape for {concept.tag}: {cached_data.shape}")
+                if cached_data is not None and not cached_data.empty:
+                    all_dates.update(cached_data['filing_date'])
+                    valid_concepts.append(concept)
                    
                    # Log incoming cached data size
                    cached_memory = cached_data.memory_usage(deep=True).sum()
