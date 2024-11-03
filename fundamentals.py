@@ -12,13 +12,6 @@ import sqlite3
 import time
 import hashlib
 import gc
-import concurrent.futures
-import psutil
-from tqdm import tqdm
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
-from rich.logging import RichHandler
-
 
 @dataclass
 class SECConcept:
@@ -27,7 +20,6 @@ class SECConcept:
     taxonomy: str = "us-gaap"
     units: str = "USD"
     description: str = ""
-
 
 class SECDataExtractor:
     """Extracts raw SEC fundamental data with granular caching."""
@@ -322,6 +314,7 @@ class SECDataExtractor:
                     # Record the current timestamp and proceed
                     SECDataExtractor._request_timestamps.append(current_time)
                     break
+            time.sleep(0.01)  # Sleep briefly to prevent tight loop
 
         try:
             response = finagg.sec.api.company_concept.get(
@@ -444,6 +437,7 @@ class SECDataExtractor:
                     self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
                     continue
      
+                # Fetch data from API with rate limiting
                 df = self.rate_limited_get(
                     tag=concept.tag,
                     ticker=ticker,
@@ -566,7 +560,6 @@ class SECDataExtractor:
             self.logger.error(f"Failed to process {ticker}: {str(e)}")
             raise
 
-
 class CacheManager:
     MIN_CONCEPT_THRESHOLD = 70  # Minimum concepts required for a ticker to be considered fully processed
     
@@ -640,7 +633,7 @@ class CacheManager:
                         ticker_stats_dict[ticker] = last_update
 
         # Now scan for recent .tsv files
-        data_dir = self.cache_dir.parent.parent
+        data_dir = self.cache_dir.parent.parent  # Adjusted to match the cache directory structure
         recent_files = list(data_dir.glob('**/*sec_data_*.tsv'))
         
         for file_path in recent_files:
@@ -870,7 +863,6 @@ class CacheManager:
                     self.logger.error(f"Error caching result for {ticker}: {e}")
                     raise
 
-
     def save_batch_stats(self, batch_id: str, stats: Dict):
         """Save statistics for a processing batch."""
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -890,7 +882,6 @@ class CacheManager:
                 )
             )
 
-
 class ProgressTracker:
     """Tracks and displays processing progress using rich console."""
     
@@ -898,7 +889,10 @@ class ProgressTracker:
         self.console = Console()
         self.progress = Progress(
             SpinnerColumn(),
-            *Progress.get_default_columns(),
+            "[progress.description]{task.description}",
+            "•",
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            "•",
             TimeElapsedColumn(),
             console=self.console
         )
@@ -915,7 +909,7 @@ class ProgressTracker:
 
     def update_progress(self, completed: Optional[int], batch_completed: Optional[int] = None):
         """Update progress bars."""
-        if completed is not None:
+        if completed is not None and self.total_task:
             self.progress.update(self.total_task, completed=completed)
         if batch_completed is not None and self.current_batch_task:
             self.progress.update(self.current_batch_task, completed=batch_completed)
@@ -942,7 +936,6 @@ class ProgressTracker:
             self.current_batch_task = None
             self.console = None
 
-
 def setup_environment():
     """Set up environment variables and configurations."""
     load_dotenv()
@@ -956,7 +949,6 @@ def setup_environment():
     
     finagg.sec.api.company_concept.SEC_USER_AGENT = sec_user_agent
 
-
 def setup_logging(output_dir: Path) -> logging.Logger:
     """Set up rich logging configuration."""
     logging.basicConfig(
@@ -969,7 +961,6 @@ def setup_logging(output_dir: Path) -> logging.Logger:
     )
     return logging.getLogger(__name__)
 
-
 def calculate_data_hash(data_file: Path) -> str:
     """Calculate SHA-256 hash of data file for cache validation."""
     if not data_file.exists():
@@ -981,10 +972,8 @@ def calculate_data_hash(data_file: Path) -> str:
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
-
 MAX_RETRIES = 3
 BASE_RETRY_DELAY = 1
-
 
 def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: CacheManager, progress_tracker: ProgressTracker) -> List[dict]:
     """Process a batch of tickers."""
@@ -1037,7 +1026,7 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
                     if "429" in str(e) or "Too Many Requests" in str(e):
                         if attempt < MAX_RETRIES - 1:
                             delay = BASE_RETRY_DELAY * (2 ** attempt)
-                            logging.warning(
+                            cache_manager.logger.warning(
                                 f"Rate limit hit for {ticker}, attempt {attempt + 1}/{MAX_RETRIES}. "
                                 f"Waiting {delay}s"
                             )
@@ -1053,13 +1042,12 @@ def process_ticker_batch(tickers: List[str], output_dir: Path, cache_manager: Ca
             }
             cache_manager.cache_result(ticker, error_result)
             results.append(error_result)
-            logging.error(f"Failed to process {ticker}: {str(e)}")
+            cache_manager.logger.error(f"Failed to process {ticker}: {str(e)}")
 
         completed_in_batch += 1
         progress_tracker.update_progress(completed=None, batch_completed=completed_in_batch)
 
     return results
-
 
 def parallel_process_tickers(
     input_file: str,
@@ -1100,6 +1088,7 @@ def parallel_process_tickers(
         batch_size,
         max(10, int(available_memory / (estimated_memory_per_ticker * 2)))
     )
+    logger.info(f"Optimal batch size set to {optimal_batch_size} based on available memory.")
     
     # Split tickers into batches
     ticker_batches = [
@@ -1152,8 +1141,9 @@ def parallel_process_tickers(
         batch_df = pd.DataFrame(batch_results)
         batch_file = output_path / f'batch_results_{batch_id}_part{batch_num}.csv'
         batch_df.to_csv(batch_file, index=False)
+        logger.info(f"Batch {batch_num} results saved to {batch_file}")
         return []
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for batch_num, batch in enumerate(ticker_batches, start=1):
             # Wait if too many active futures
@@ -1258,7 +1248,6 @@ def parallel_process_tickers(
     
     return final_results_df
 
-
 def main():
     """Main execution function with configuration."""
     # Configuration
@@ -1305,7 +1294,6 @@ def main():
         console.print(f"\n[bold red]❌ Fatal error: {str(e)}[/bold red]")
         console.print_exception()
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
