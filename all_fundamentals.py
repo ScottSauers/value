@@ -140,6 +140,7 @@ class CacheManager:
     def get_cached_result(self, ticker: str) -> Optional[Dict]:
         """Retrieve cached result for a ticker if it exists and is recent, along with concept count."""
         with self._lock:
+            # First check ticker_cache.db for processed status
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.execute('''
                     SELECT * FROM processed_tickers 
@@ -148,14 +149,16 @@ class CacheManager:
                 result = cursor.fetchone()
     
                 if result:
-                    # Count the number of concepts present for this ticker
-                    concept_count_cursor = conn.execute('''
-                        SELECT COUNT(DISTINCT concept_tag) 
-                        FROM concept_cache 
-                        WHERE ticker = ? 
-                          AND last_updated > datetime("now", "-7 days")
-                    ''', (ticker,))
-                    concept_count = concept_count_cursor.fetchone()[0] if concept_count_cursor else 0
+                    # Now check granular_cache.db for concept count
+                    granular_db_path = self.cache_dir / 'granular_cache.db'
+                    with sqlite3.connect(str(granular_db_path)) as gconn:
+                        concept_count_cursor = gconn.execute('''
+                            SELECT COUNT(DISTINCT concept_tag) 
+                            FROM concept_cache 
+                            WHERE ticker = ? 
+                              AND last_updated > datetime("now", "-7 days")
+                        ''', (ticker,))
+                        concept_count = concept_count_cursor.fetchone()[0] if concept_count_cursor else 0
     
                     return {
                         'ticker': result[0],
