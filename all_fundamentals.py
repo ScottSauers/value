@@ -23,7 +23,7 @@ import psutil
 import threading
 
 class CacheManager:
-    MIN_CONCEPT_THRESHOLD = 74  # Minimum concepts required for a ticker to be considered fully processed
+    MIN_CONCEPT_THRESHOLD = 65  # Minimum concepts required for a ticker to be considered fully processed
     
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
@@ -87,7 +87,7 @@ class CacheManager:
                     WHERE concept_value IS NOT NULL
                     AND last_updated > datetime('now', '-7 days')
                     GROUP BY ticker
-                    HAVING concept_count > 74
+                    HAVING concept_count > 65
                 ''')
                 ticker_stats = cursor.fetchall()
                 for ticker, _, last_update in ticker_stats:
