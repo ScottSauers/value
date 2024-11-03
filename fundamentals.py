@@ -88,6 +88,7 @@ class SECDataExtractor:
         SECConcept("InventoryNet"),
         SECConcept("PrepaidExpenseAndOtherAssetsCurrent"),
         SECConcept("PropertyPlantAndEquipmentNet"),
+        SECConcept("Goodwill"),
         SECConcept("OperatingLeaseRightOfUseAsset"),
         SECConcept("IntangibleAssetsNetExcludingGoodwill"),
         SECConcept("OtherAssets"),
