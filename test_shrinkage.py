@@ -4,6 +4,7 @@ import numpy as np
 from typing import Tuple, Optional, Union, Dict
 from shrinkage import shrinkage_estimation
 import sys
+from scipy import linalg
 
 def debug_print(msg, data=None, max_lines=10):
     """Debug printing function for monitoring execution."""
@@ -13,6 +14,8 @@ def debug_print(msg, data=None, max_lines=10):
             print(f"Shape: {data.shape}")
             print(f"First {max_lines} rows:")
             print(data.head(max_lines))
+            print("\nData Info:")
+            print(data.info())
         else:
             print(data)
     sys.stdout.flush()
@@ -63,18 +66,35 @@ def load_price_data(file_path: str, start_date: str) -> pd.DataFrame:
         raise ValueError("No price columns found in data")
     
     df_prices = df[price_cols].copy()
+    debug_print("Initial price data shape", df_prices.shape)
     
     # Remove companies with too many missing values
     pct_missing = df_prices.isnull().mean()
     valid_cols = pct_missing[pct_missing < 0.01].index
     df_prices = df_prices[valid_cols]
     
+    # Forward fill remaining missing values
+    df_prices = df_prices.fillna(method='ffill')
+    
+    debug_print("Price data after cleaning", df_prices.shape)
     return df_prices
 
 def calculate_returns(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate returns from price data."""
-    returns = df.pct_change().dropna()
+    # Fill any remaining NAs before calculating returns
+    df_filled = df.fillna(method='ffill').fillna(method='bfill')
+    
+    # Calculate returns with explicit fill_method=None since we pre-filled
+    returns = df_filled.pct_change(fill_method=None).dropna()
     returns.columns = [col.replace('_close', '') for col in returns.columns]
+    
+    # Remove any infinite values
+    returns = returns.replace([np.inf, -np.inf], np.nan)
+    returns = returns.dropna()
+    
+    debug_print("Returns data shape", returns.shape)
+    debug_print("Returns summary stats", returns.describe())
+    
     return returns
 
 def calculate_shrinkage_covariance(
@@ -110,16 +130,39 @@ def calculate_shrinkage_covariance(
         return cov_df
 
 def minimum_variance_portfolio(cov_matrix: pd.DataFrame) -> pd.Series:
-    """Calculate minimum variance portfolio weights."""
-    n = len(cov_matrix)
-    ones = np.ones(n)
-    inv_cov = np.linalg.inv(cov_matrix.values)
-    weights = inv_cov @ ones / (ones @ inv_cov @ ones)
-    return pd.Series(weights, index=cov_matrix.index)
+    """
+    Calculate minimum variance portfolio weights with improved numerical stability.
+    """
+    try:
+        n = len(cov_matrix)
+        ones = np.ones(n)
+        
+        # Use scipy's more stable solver instead of direct inversion
+        weights = linalg.solve(cov_matrix.values, ones, assume_a='pos')
+        weights = weights / np.sum(weights)  # Normalize to sum to 1
+        
+        # Check for reasonable weights
+        if np.any(np.abs(weights) > 10):  # Arbitrary threshold for "too extreme"
+            raise ValueError("Extreme weights detected")
+            
+        return pd.Series(weights, index=cov_matrix.index)
+        
+    except Exception as e:
+        debug_print(f"Error in minimum_variance_portfolio: {str(e)}")
+        # Fall back to equal weights if optimization fails
+        n = len(cov_matrix)
+        return pd.Series(np.ones(n) / n, index=cov_matrix.index)
 
 def portfolio_variance(weights: pd.Series, cov_matrix: pd.DataFrame) -> float:
-    """Calculate portfolio variance."""
-    return weights @ cov_matrix @ weights
+    """Calculate portfolio variance with error checking."""
+    try:
+        var = weights @ cov_matrix @ weights
+        if np.isnan(var) or np.isinf(var):
+            raise ValueError("Invalid variance calculated")
+        return var
+    except Exception as e:
+        debug_print(f"Error calculating portfolio variance: {str(e)}")
+        return np.nan
 
 def evaluate_out_of_sample(
     returns: pd.DataFrame,
@@ -129,47 +172,56 @@ def evaluate_out_of_sample(
 ) -> Dict[str, list]:
     """
     Evaluate shrinkage methods using out-of-sample portfolio variance.
-    
-    Uses a rolling window approach:
-    1. Estimate covariance using estimation_window
-    2. Form minimum variance portfolio
-    3. Calculate realized variance in prediction_window
-    4. Roll forward and repeat
     """
     results = {method: [] for method in methods}
-    results['sample'] = []  # Also track regular sample covariance
-  
+    results['sample'] = []
+    
+    # Ensure we have enough data
+    if len(returns) < estimation_window + prediction_window:
+        raise ValueError("Not enough data for out-of-sample evaluation")
+    
+    debug_print(f"Starting evaluation with {len(returns)} periods of data")
+    
     for t in range(0, len(returns) - estimation_window - prediction_window, prediction_window):
-        # Split data into estimation and validation periods
+        debug_print(f"Evaluation window starting at period {t}")
+        
+        # Split data
         est_returns = returns.iloc[t:t+estimation_window]
         val_returns = returns.iloc[t+estimation_window:t+estimation_window+prediction_window]
         
-        # Calculate realized covariance for validation period
+        # Skip if we have too few observations in either window
+        if len(est_returns) < estimation_window/2 or len(val_returns) < prediction_window/2:
+            debug_print("Skipping window due to insufficient data")
+            continue
+            
+        # Calculate realized covariance
         realized_cov = val_returns.cov()
         
-        # For each method:
-        # 1. Estimate covariance
-        # 2. Calculate minimum variance portfolio
-        # 3. Calculate realized variance
-        
-        # Regular sample covariance
-        sample_cov = est_returns.cov()
-        w_sample = minimum_variance_portfolio(sample_cov)
-        realized_var_sample = portfolio_variance(w_sample, realized_cov)
-        results['sample'].append(realized_var_sample)
+        # Sample covariance
+        try:
+            sample_cov = est_returns.cov()
+            w_sample = minimum_variance_portfolio(sample_cov)
+            realized_var_sample = portfolio_variance(w_sample, realized_cov)
+            results['sample'].append(realized_var_sample)
+        except Exception as e:
+            debug_print(f"Error with sample covariance: {str(e)}")
+            results['sample'].append(np.nan)
         
         # Shrinkage methods
         for method in methods:
             try:
                 cov_est = calculate_shrinkage_covariance(est_returns, method=method)
                 if isinstance(cov_est, tuple):
-                    cov_est = cov_est[0]  # Take just the matrix for linear methods
+                    cov_est = cov_est[0]
                 
                 weights = minimum_variance_portfolio(cov_est)
                 realized_var = portfolio_variance(weights, realized_cov)
                 results[method].append(realized_var)
+                
+                debug_print(f"Method {method} - realized variance: {realized_var}")
+                
             except Exception as e:
-                debug_print(f"Error with method {method} at time {t}: {str(e)}")
+                debug_print(f"Error with method {method}: {str(e)}")
                 results[method].append(np.nan)
     
     return results
@@ -180,18 +232,12 @@ def main():
         base_dir = Path("data/transformed")
         
         # Find latest price files
-        weekly_files = list(base_dir.glob("price_data_1wk_*.tsv"))
         daily_files = list(base_dir.glob("price_data_1d_*.csv"))
         
-        if not weekly_files and not daily_files:
-            print("Error: No price data files found")
-            sys.exit(1)
+        if not daily_files:
+            raise ValueError("No daily price data files found")
         
-        latest_daily = max(daily_files, default=None)
-        
-        if latest_daily is None:
-            print("Error: No daily price data found")
-            sys.exit(1)
+        latest_daily = max(daily_files)
         
         # Use 6 years of data (5 for estimation, 1 for validation)
         start_date = (pd.Timestamp.now() - pd.Timedelta(days=2190)).strftime('%Y-%m-%d')
@@ -199,6 +245,8 @@ def main():
         # Load and process data
         df_prices = load_price_data(str(latest_daily), start_date)
         returns = calculate_returns(df_prices)
+        
+        debug_print("Final returns data shape before evaluation", returns.shape)
         
         # Evaluate all methods out-of-sample
         methods = ['identity', 'const_corr', 'single_factor', 'nonlinear']
@@ -209,6 +257,7 @@ def main():
             method: {
                 'Mean Variance': np.nanmean(variances),
                 'Std Variance': np.nanstd(variances),
+                'Success Rate': np.mean(~np.isnan(variances)),
                 'Sharpe Ratio': np.nanmean(variances) / np.nanstd(variances)
             }
             for method, variances in results.items()
