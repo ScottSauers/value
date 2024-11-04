@@ -188,11 +188,11 @@ def main():
     if not final_data.empty:
         # Calculate concept presence percentages
         concept_presence = (final_data.sum(axis=1) / len(final_data.columns)) * 100
-        final_summary = pd.DataFrame({"Concept": final_data.index, "Percent of Companies": concept_presence})
-        final_summary.to_csv(CSV_PATH, index=False)
+        final_data['Percent of Companies'] = concept_presence
+        final_data.to_csv(CSV_PATH)
 
         print("\nConcept Tags Summary:")
-        for ticker in final_data.columns:
+        for ticker in final_data.columns[:-1]:
             concept_count = final_data[ticker].sum()
             logger.info(f"Ticker: {ticker}, Total Concepts Extracted: {int(concept_count)}")
 
