@@ -170,7 +170,8 @@ def main():
 
             # Save incremental results to prevent data loss
             if all_data:
-                pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T.to_csv(CSV_PATH)
+                updated_data = existing_data.combine_first(pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T)
+                updated_data.to_csv(CSV_PATH)
             pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
 
     # Final summary statistics
@@ -200,11 +201,14 @@ def main():
         concepts_more_than_one = (final_data.sum(axis=1) > 1).sum()
         concepts_over_50_percent = (concept_presence > 50).sum()
         total_concepts = len(final_data.index)
+        max_concept_presence = concept_presence.max()
+        concepts_at_least_half_max = (concept_presence >= (max_concept_presence / 2)).sum()
 
         logger.info(f"\nAdditional Summary Statistics:\n"
                     f"Total Concepts: {total_concepts}\n"
                     f"Concepts present in more than one company: {concepts_more_than_one}\n"
-                    f"Concepts present in over 50% of companies: {concepts_over_50_percent}")
+                    f"Concepts present in over 50% of companies: {concepts_over_50_percent}\n"
+                    f"Concepts present in at least half of the number of companies that the most common concept is present in: {concepts_at_least_half_max}")
 
 if __name__ == "__main__":
     main()
