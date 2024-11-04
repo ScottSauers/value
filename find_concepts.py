@@ -174,13 +174,18 @@ def main():
             pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
 
     # Final summary statistics
+    if to_process_count == 0 and not all_data:
+        # Use cached data for summary statistics if everything was already processed
+        final_data = existing_data
+    else:
+        final_data = pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T if all_data else existing_data
+
     percent_no_10k = (no_10k_count / to_process_count) * 100 if to_process_count > 0 else 0
     logger.info(f"\nSummary Statistics:\nTotal tickers processed: {to_process_count}\n"
                 f"No 10-K found for {no_10k_count} companies ({percent_no_10k:.2f}% of total)\n"
                 f"Results saved to {CSV_PATH}")
 
-    if all_data:
-        final_data = pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T
+    if not final_data.empty:
         print("\nConcept Tags Summary:")
         for ticker in final_data.columns:
             concept_count = final_data[ticker].sum()
