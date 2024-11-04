@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from tqdm import tqdm
 from threading import Lock
+from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 import re
 
@@ -20,6 +21,7 @@ CSV_PATH = OUTPUT_DIR / "company_xbrl_tags_summary.csv"
 NO_10K_CSV_PATH = OUTPUT_DIR / "no_10k_tickers.csv"
 FILING_TYPE = '10-K'
 MAX_REQUESTS_PER_SECOND = 8  # Strict rate limit
+MAX_WORKERS = 5  # Number of parallel threads
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -154,25 +156,27 @@ def main():
     all_data = {}
     no_10k_count = 0
 
-    with tqdm(total=to_process_count, desc="Processing Tickers", unit="ticker") as pbar:
-        for ticker in tickers_to_process:
-            ticker, cik, tags = process_ticker(ticker)
-            if ticker is None:
-                continue
+    def process_and_cache_ticker(ticker):
+        nonlocal no_10k_count
+        ticker, cik, tags = process_ticker(ticker)
+        if ticker is None:
+            return
 
-            if tags is None:
-                no_10k_count += 1
-                no_10k_tickers.add(ticker)
-            else:
-                all_data[ticker] = {tag: 1 for tag in tags}
+        if tags is None:
+            no_10k_count += 1
+            no_10k_tickers.add(ticker)
+        else:
+            all_data[ticker] = {tag: 1 for tag in tags}
 
-            pbar.update(1)
-
-            # Save incremental results to prevent data loss
+        # Save incremental results to prevent data loss
+        with lock:
             if all_data:
                 updated_data = existing_data.combine_first(pd.DataFrame.from_dict(all_data, orient='index').fillna(0).T)
                 updated_data.to_csv(CSV_PATH)
             pd.DataFrame({TICKER_COLUMN: list(no_10k_tickers)}).to_csv(NO_10K_CSV_PATH, index=False)
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        list(tqdm(executor.map(process_and_cache_ticker, tickers_to_process), total=to_process_count, desc="Processing Tickers", unit="ticker"))
 
     # Final summary statistics
     if to_process_count == 0 and not all_data:
