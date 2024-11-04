@@ -6,7 +6,7 @@ import logging
 import time
 from pathlib import Path
 from tqdm import tqdm
-from threading import Lock
+from threading import Lock, Semaphore
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 import re
@@ -21,7 +21,7 @@ CSV_PATH = OUTPUT_DIR / "company_xbrl_tags_summary.csv"
 NO_10K_CSV_PATH = OUTPUT_DIR / "no_10k_tickers.csv"
 FILING_TYPE = '10-K'
 MAX_REQUESTS_PER_SECOND = 8  # Strict rate limit
-MAX_WORKERS = 5  # Number of parallel threads
+MAX_WORKERS = 10  # Number of parallel threads
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -43,23 +43,18 @@ processed_tickers = set(existing_data.columns) | no_10k_tickers
 
 # Rate limiting mechanism
 lock = Lock()
+semaphore = Semaphore(MAX_REQUESTS_PER_SECOND)
 request_times = deque()
 
 def rate_limited_request(url, headers):
-    with lock:
+    with semaphore:
         current_time = time.time()
         # Remove timestamps older than 1 second
-        while request_times and current_time - request_times[0] >= 1:
-            request_times.popleft()
-        # If we've reached the max requests per second, wait
-        if len(request_times) >= MAX_REQUESTS_PER_SECOND:
-            sleep_time = 1 - (current_time - request_times[0])
-            time.sleep(sleep_time)
-            current_time = time.time()
-            # Remove the timestamp we're now past
-            request_times.popleft()
-        request_times.append(current_time)
-    response = requests.get(url, headers=headers)
+        with lock:
+            while request_times and current_time - request_times[0] >= 1:
+                request_times.popleft()
+            request_times.append(current_time)
+        response = requests.get(url, headers=headers)
     return response
 
 # Retrieve XBRL tags for a company's latest 10-K filing
