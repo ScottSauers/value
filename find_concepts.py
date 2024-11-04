@@ -186,10 +186,25 @@ def main():
                 f"Results saved to {CSV_PATH}")
 
     if not final_data.empty:
+        # Calculate concept presence percentages
+        concept_presence = (final_data.sum(axis=1) / len(final_data.columns)) * 100
+        final_summary = pd.DataFrame({"Concept": final_data.index, "Percent of Companies": concept_presence})
+        final_summary.to_csv(CSV_PATH, index=False)
+
         print("\nConcept Tags Summary:")
         for ticker in final_data.columns:
             concept_count = final_data[ticker].sum()
             logger.info(f"Ticker: {ticker}, Total Concepts Extracted: {int(concept_count)}")
+
+        # Additional statistics
+        concepts_more_than_one = (final_data.sum(axis=1) > 1).sum()
+        concepts_over_50_percent = (concept_presence > 50).sum()
+        total_concepts = len(final_data.index)
+
+        logger.info(f"\nAdditional Summary Statistics:\n"
+                    f"Total Concepts: {total_concepts}\n"
+                    f"Concepts present in more than one company: {concepts_more_than_one}\n"
+                    f"Concepts present in over 50% of companies: {concepts_over_50_percent}")
 
 if __name__ == "__main__":
     main()
