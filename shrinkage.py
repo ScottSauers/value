@@ -184,21 +184,13 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
                                  demean: bool = True) -> Tuple[np.ndarray, float]:
     """
     Compute linear shrinkage estimator with single factor target.
-    
-    Args:
-        returns: T x N matrix of returns
-        market_returns: Optional T x 1 market returns
-        demean: Whether to demean the returns
-        
-    Returns:
-        Shrinkage estimator, shrinkage intensity
     """
     returns, T, N = preprocess_returns(returns, demean)
     
     if market_returns is not None and demean:
         market_returns = market_returns - market_returns.mean()
     
-    # Sample covariance
+    # Sample covariance  
     S = np.cov(returns, rowvar=False, ddof=1)
     
     # Single factor target
@@ -207,10 +199,23 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
     # Frobenius norm
     d2 = np.sum((S - F) ** 2)
     
-    # Estimate optimal shrinkage intensity (similar to identity target case)
-    b2 = np.mean(returns**2) ** 2  
-    b2 = min(b2, d2)
-    shrinkage = b2 / d2
+    # Estimate pi (sum of asymptotic variances)
+    Y = returns ** 2
+    phi_mat = (Y.T @ Y) / T - S ** 2 
+    pi = np.sum(phi_mat)
+    
+    # Estimate rho (asymptotic covariance)
+    theta_mat = (returns ** 3).T @ returns / T
+    if market_returns is None:
+        market_returns = returns.mean(axis=1)
+    betas = np.linalg.lstsq(np.column_stack([np.ones(T), market_returns]), returns, rcond=None)[0][1]
+    var_market = np.var(market_returns, ddof=1)
+    rho = (np.sum(np.diag(phi_mat)) + 
+           var_market * np.mean(theta_mat / (betas @ betas.T)) * 
+           np.sum(F - np.diag(np.diag(F))))
+    
+    # Compute optimal shrinkage intensity
+    shrinkage = max(0, min(1, (pi - rho) / (d2 * T)))
     
     # Compute estimator
     sigma = shrinkage * F + (1 - shrinkage) * S
