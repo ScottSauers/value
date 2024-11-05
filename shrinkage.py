@@ -186,42 +186,48 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
                                  market_returns: Optional[np.ndarray] = None,
                                  demean: bool = True) -> Tuple[np.ndarray, float]:
     """
-    Compute linear shrinkage estimator with single factor target.
+    Compute linear shrinkage with single factor target following L&W 2020.
     """
     returns, T, N = preprocess_returns(returns, demean)
     
-    if market_returns is not None and demean:
-        market_returns = market_returns - market_returns.mean()
-    
-    # Sample covariance  
+    # Compute sample covariance
     S = np.cov(returns, rowvar=False, ddof=1)
     
-    # Single factor target
-    F = single_factor_target(returns, market_returns)
+    # Handle market returns
+    if market_returns is None:
+        market_returns = returns.mean(axis=1, keepdims=True)
+    else:
+        market_returns = market_returns.reshape(-1, 1)
+        if demean:
+            market_returns = market_returns - market_returns.mean()
+            
+    # Compute factor target
+    X = np.column_stack([np.ones(T), market_returns])
+    betas = np.linalg.lstsq(X, returns, rcond=None)[0][1]
+    residuals = returns - market_returns @ betas.reshape(1,-1)
+    D = np.diag(np.var(residuals, axis=0, ddof=1))
+    var_market = np.var(market_returns, ddof=1)
+    F = var_market * np.outer(betas, betas) + D
     
-    # Frobenius norm
+    # Compute Frobenius norm 
     d2 = np.sum((S - F) ** 2)
     
-    # Estimate pi (sum of asymptotic variances)
-    Y = returns ** 2
-    phi_mat = (Y.T @ Y) / T - S ** 2 
+    # Estimate pi
+    Y = returns ** 2  # Element-wise square
+    phi_mat = (Y.T @ Y) / T - S ** 2
     pi = np.sum(phi_mat)
     
-    # Estimate rho (asymptotic covariance)
+    # Estimate rho - key formula from paper
     theta_mat = (returns ** 3).T @ returns / T
-    if market_returns is None:
-        market_returns = returns.mean(axis=1)
-    betas = np.linalg.lstsq(np.column_stack([np.ones(T), market_returns]), returns, rcond=None)[0][1]
-    var_market = np.var(market_returns, ddof=1)
-
     rho = np.sum(np.diag(phi_mat)) + \
-          var_market * np.mean(theta_mat) * np.sum(F - np.diag(np.diag(F)))
-                                   
-    # Compute optimal shrinkage intensity
+          var_market * np.sum(betas**2) * np.mean(theta_mat)
+    
+    # Compute shrinkage intensity with proper scaling
     shrinkage = max(0, min(1, (pi - rho) / (d2 * T)))
     
-    # Compute estimator
+    # Form final estimate with symmetry enforcement
     sigma = shrinkage * F + (1 - shrinkage) * S
+    sigma = (sigma + sigma.T) / 2
     
     return sigma, shrinkage
 
