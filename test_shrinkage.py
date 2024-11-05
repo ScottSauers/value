@@ -224,22 +224,36 @@ class CovarianceEvaluator:
         """Calculate comprehensive evaluation metrics."""
         metrics = {}
         
-        # 1. Matrix distance metrics
+        # Matrix distance metrics
         metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
         
-        # 2. Portfolio-based metrics
+        # Portfolio-based metrics
         try:
-            # Construct minimum variance portfolio
+            # Construct minimum variance portfolio with improved conditioning
             n = len(est_cov)
             ones = np.ones(n)
             
-            # Add small regularization for numerical stability
-            epsilon = 1e-8 * np.trace(est_cov) / n
+            # More aggressive regularization
+            epsilon = 1e-6 * np.trace(est_cov) / n
             reg_est_cov = est_cov + epsilon * np.eye(n)
             
-            # Calculate weights
-            weights = linalg.solve(reg_est_cov, ones, assume_a='pos')
+            try:
+                # First try Cholesky decomposition
+                L = linalg.cholesky(reg_est_cov, lower=True)
+                weights = linalg.solve_triangular(L, ones, lower=True)
+                weights = linalg.solve_triangular(L.T, weights, lower=False)
+            except:
+                # If Cholesky fails, try eigen-decomposition based regularization
+                eigenvals, eigenvecs = linalg.eigh(reg_est_cov)
+                min_eig = np.maximum(eigenvals.min(), 1e-8)
+                reg_est_cov = reg_est_cov + (min_eig * np.eye(n))
+                weights = linalg.solve(reg_est_cov, ones, assume_a='pos')
+                
             weights = weights / weights.sum()
+            
+            # Check for numerical stability
+            if np.any(np.abs(weights) > 10) or np.any(np.isnan(weights)):
+                raise ValueError("Unstable weights detected")
             
             # Calculate predicted vs realized risk
             pred_var = weights @ est_cov @ weights
@@ -253,7 +267,12 @@ class CovarianceEvaluator:
             port_rets = val_returns @ weights
             metrics['realized_ret'] = port_rets.mean()
             metrics['realized_std'] = port_rets.std()
-            metrics['realized_sharpe'] = metrics['realized_ret'] / metrics['realized_std']
+            metrics['realized_sharpe'] = metrics['realized_ret'] / metrics['realized_std'] if metrics['realized_std'] > 0 else 0
+            
+            # Add portfolio properties
+            metrics['max_weight'] = np.abs(weights).max()
+            metrics['min_weight'] = np.abs(weights).min()
+            metrics['weight_std'] = weights.std()
             
         except Exception as e:
             self.logger.print_and_log(f"Error in portfolio calculations: {str(e)}")
@@ -263,7 +282,10 @@ class CovarianceEvaluator:
                 'var_ratio': np.nan,
                 'realized_ret': np.nan,
                 'realized_std': np.nan,
-                'realized_sharpe': np.nan
+                'realized_sharpe': np.nan,
+                'max_weight': np.nan,
+                'min_weight': np.nan,
+                'weight_std': np.nan
             })
         
         return metrics
