@@ -223,39 +223,37 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
     return sigma, shrinkage
 
 def nonlinear_analytical_shrinkage(returns: np.ndarray,
+                                 market_returns: Optional[np.ndarray] = None,
                                  demean: bool = True) -> np.ndarray:
-    """
-    Compute nonlinear analytical shrinkage estimator.
-    
-    Based on Ledoit & Wolf (2020) "Analytical Nonlinear Shrinkage of Large-Dimensional 
-    Covariance Matrices"
-    
-    Args:
-        returns: T x N matrix of returns
-        demean: Whether to demean the returns
-        
-    Returns:
-        Shrinkage estimator
-    """
     returns, T, N = preprocess_returns(returns, demean)
     
     # Sample covariance eigendecomposition
     S = np.cov(returns, rowvar=False, ddof=1)
     eigenvalues, eigenvectors = np.linalg.eigh(S)
     
+    # Account for market factor influence 
+    if market_returns is None:
+        market_returns = returns.mean(axis=1)
+    X = np.column_stack([np.ones(T), market_returns]) 
+    betas = np.linalg.lstsq(X, returns, rcond=None)[0][1]
+    residuals = returns - market_returns.reshape(-1,1) @ betas.reshape(1,-1)
+    
     # Concentration ratio
     c = N / T
     
-    # Kernel estimation of eigenvalue density
+    # Modified kernel estimation incorporating market factor
+    var_market = np.var(market_returns, ddof=1)
     h = 0.9 * min(np.std(eigenvalues), stats.iqr(eigenvalues)/1.34) * N**(-0.2)
     grid = np.linspace(min(eigenvalues)-4*h, max(eigenvalues)+4*h, 512)
     density = stats.gaussian_kde(eigenvalues, bw_method=h)(grid)
     
-    # Hilbert transform estimation
+    # Modified Hilbert transform estimation
     def hilbert_transform(x):
-        return np.mean(density / (grid - x))
-    
-    # Compute optimal nonlinear shrinkage
+        base = np.mean(density / (grid - x))
+        market = var_market * np.sum(betas**2) / N
+        return base + market * np.mean(1 / (grid - x))
+        
+    # Compute optimal nonlinear shrinkage considering market influence
     d = np.zeros(N)
     for i in range(N):
         if eigenvalues[i] == 0 and c > 1:
@@ -264,7 +262,7 @@ def nonlinear_analytical_shrinkage(returns: np.ndarray,
             d[i] = eigenvalues[i] / (np.pi**2 * c * eigenvalues[i] * density[i]**2 + 
                    (1-c-np.pi**2*c*eigenvalues[i]*hilbert_transform(eigenvalues[i])**2)**2)
             
-    # Reconstruct estimator
+    # Reconstruct estimator 
     sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
     
     return sigma
