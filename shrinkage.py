@@ -396,15 +396,14 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     
     # Identify noise points (-1 in labels)
     n_assets = returns.shape[1]
-    is_noise = (clusterer.labels_ == -1)
-    non_noise = ~is_noise
+    noise_idx = np.where(clusterer.labels_ == -1)[0]
+    non_noise_idx = np.where(clusterer.labels_ != -1)[0]
     
     # Initialize result matrix
     result = np.zeros((n_assets, n_assets))
     
     # Handle non-noise assets
-    if np.any(non_noise):
-        non_noise_idx = np.where(non_noise)[0]
+    if len(non_noise_idx) > 0:
         non_noise_cov = sample_cov[non_noise_idx][:, non_noise_idx]
         
         # Eigenvalue cleaning for non-noise part
@@ -413,43 +412,44 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
         # Keep top eigenvalues explaining 80% of variance
         total_var = np.sum(eigenvals)
         cum_var_ratio = np.cumsum(eigenvals[::-1])[::-1] / total_var
-        k = np.sum(cum_var_ratio > 0.2)  # keep eigenvalues explaining 80%
+        k = np.sum(cum_var_ratio > 0.2)
         
         # Clean eigenvalues
         cleaned_eigenvals = eigenvals.copy()
-        cleaned_eigenvals[:-k] = np.mean(eigenvals[:-k])  # shrink bottom eigenvalues
+        cleaned_eigenvals[:-k] = np.mean(eigenvals[:-k])
         
         # Reconstruct non-noise covariance
         cleaned_cov = eigenvecs @ np.diag(cleaned_eigenvals) @ eigenvecs.T
         result[non_noise_idx[:, None], non_noise_idx] = cleaned_cov
     
     # Handle noise assets
-    if np.any(is_noise):
-        noise_idx = np.where(is_noise)[0]
-        
-        # For noise assets, keep only variance (diagonal)
-        # and apply strong shrinkage to market factor
+    if len(noise_idx) > 0:
         market_return = np.mean(returns, axis=1)
+        market_var = np.var(market_return)
+        
         for idx in noise_idx:
             # Keep variance
             result[idx, idx] = sample_cov[idx, idx]
             
-            # Minimal market exposure (strongly shrunk)
-            if np.any(non_noise):
-                beta = 0.1 * np.cov(returns[:, idx], market_return)[0,1] / np.var(market_return)
-                result[idx, non_noise_idx] = beta * sample_cov[idx, non_noise_idx]
-                result[non_noise_idx, idx] = beta * sample_cov[non_noise_idx, idx]
+            # Calculate and shrink market exposure
+            beta = np.cov(returns[:, idx], market_return)[0,1] / market_var
+            shrunk_beta = 0.1 * beta  # strong shrinkage
+            
+            # Apply to non-noise assets
+            if len(non_noise_idx) > 0:
+                cov_with_market = shrunk_beta * np.cov(market_return, returns[:, non_noise_idx])[0, 1:]
+                result[idx, non_noise_idx] = cov_with_market
+                result[non_noise_idx, idx] = cov_with_market
     
     # Symmetry
     result = (result + result.T) / 2
     
-    # Positive definiteness by adding small diagonal if needed
+    # Positive definiteness
     min_eigenval = np.min(np.linalg.eigvals(result).real)
     if min_eigenval < 1e-10:
         result += (1e-10 - min_eigenval) * np.eye(n_assets)
     
     return result
-
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
