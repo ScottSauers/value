@@ -14,7 +14,7 @@ from typing import Tuple, Optional, Union
 import numpy as np
 from scipy import linalg
 from scipy import stats
-from sklearn.linear_model import Lasso
+from hdbscan import HDBSCAN
 
 def preprocess_returns(returns: np.ndarray, 
                       demean: bool = True) -> Tuple[np.ndarray, int, int]:
