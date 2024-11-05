@@ -375,86 +375,76 @@ class CovarianceEvaluator:
         
         return summary, results
 
-    def get_ensemble_estimate(
-        self,
-        returns: pd.DataFrame,
-        base_methods: list = ['sample', 'identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 'nonlinear'],
-        ensemble_type: str = 'smallest'
-    ) -> np.ndarray:
-        n = returns.shape[1]
-        estimates = []
-        
-        for method in base_methods:
-            try:
-                if method == 'sample':
-                    est = returns.cov().values
-                else:
-                    est = self.get_shrinkage_estimate(returns, method)
-                # Add conditioning check for each estimate
-                min_eig = np.min(np.linalg.eigvalsh(est))
-                if min_eig < 1e-8:
-                    est = est + (1e-8 - min_eig) * np.eye(n)
-                estimates.append(est)
-            except Exception as e:
-                self.logger.print_and_log(f"Error in ensemble with {method}: {str(e)}")
-                
-        if not estimates:
-            raise ValueError("No valid estimates for ensemble")
-            
-        result = np.zeros((n, n))
-        estimates_array = np.array(estimates)
-        
-        # Add scale factor to prevent numerical issues
-        scale_factor = np.median(np.abs(estimates_array))
-        if scale_factor < 1e-10:
-            scale_factor = 1.0
-        
-        for i in range(n):
-            for j in range(i + 1):
-                values = estimates_array[:, i, j]
-                values = values[~np.isnan(values)]
-                
-                if len(values) == 0:
-                    raise ValueError(f"No valid estimates for position ({i}, {j})")
-                    
-                sorted_vals = np.sort(values)
-                
-                # Add minimum threshold relative to scale
-                min_threshold = 1e-10 * scale_factor
-                
-                if ensemble_type == 'smallest':
-                    val = max(sorted_vals[0], min_threshold)
-                elif ensemble_type == 'second_smallest':
-                    val = max(sorted_vals[1] if len(sorted_vals) > 1 else sorted_vals[0], min_threshold)
-                elif ensemble_type == 'third_smallest':
-                    val = max(sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[-1], min_threshold)
-                elif ensemble_type == 'trimmed_mean':
-                    if len(values) >= 4:
-                        q1, q3 = np.percentile(values, [25, 75])
-                        iqr = q3 - q1
-                        lower = max(q1 - 1.5 * iqr, min_threshold)
-                        upper = q3 + 1.5 * iqr
-                        trimmed = values[(values >= lower) & (values <= upper)]
-                        val = max(np.mean(trimmed), min_threshold)
-                    else:
-                        val = max(np.mean(values), min_threshold)
-                        
-                result[i, j] = val
-                if i != j:
-                    result[j, i] = val
-        
-        # Eigenvalue conditioning
-        eigenvals = linalg.eigvalsh(result)
-        min_eig = np.min(eigenvals)
-        max_eig = np.max(eigenvals)
-        
-        if min_eig < 1e-8 * max_eig:
-            result += (1e-8 * max_eig - min_eig) * np.eye(n)
-        
-        # Final symmetry enforcement
-        result = (result + result.T) / 2
-        
-        return result
+def get_ensemble_estimate(
+   self,
+   returns: pd.DataFrame,
+   base_methods: list = ['sample', 'identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 'nonlinear'],
+   ensemble_type: str = 'smallest'
+) -> np.ndarray:
+   """Get ensemble covariance estimate using element-wise combination."""
+   n = returns.shape[1]
+   estimates = []
+   
+   for method in base_methods:
+       try:
+           if method == 'sample':
+               est = returns.cov().values
+           else:
+               est = self.get_shrinkage_estimate(returns, method)
+           estimates.append(est)
+       except Exception as e:
+           self.logger.print_and_log(f"Error in ensemble with {method}: {str(e)}")
+           
+   if not estimates:
+       raise ValueError("No valid estimates for ensemble")
+       
+   result = np.zeros((n, n))
+   estimates_array = np.array(estimates)
+   
+   for i in range(n):
+       for j in range(i + 1):
+           values = estimates_array[:, i, j]
+           values = values[~np.isnan(values)]
+           
+           if len(values) == 0:
+               raise ValueError(f"No valid estimates for position ({i}, {j})")
+    
+           sorted_vals = np.sort(values)
+           
+           if ensemble_type == 'smallest':
+               val = sorted_vals[0]
+               if np.abs(val) < 1e-10:  # If too close to zero, use next value
+                   val = sorted_vals[1] if len(sorted_vals) > 1 else sorted_vals[0]
+           elif ensemble_type == 'second_smallest':
+               if len(sorted_vals) > 1:
+                   val = sorted_vals[1]
+                   if np.abs(val) < 1e-10:  # If too close to zero, use next value
+                       val = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[1]
+               else:
+                   val = sorted_vals[0]
+           elif ensemble_type == 'third_smallest':
+               val = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[-1]
+           elif ensemble_type == 'trimmed_mean':
+               if len(values) >= 4:
+                   q1, q3 = np.percentile(values, [25, 75])
+                   iqr = q3 - q1
+                   lower = q1 - 1.5 * iqr
+                   upper = q3 + 1.5 * iqr
+                   trimmed = values[(values >= lower) & (values <= upper)]
+                   val = np.mean(trimmed)
+               else:
+                   val = np.mean(values)
+                   
+           result[i, j] = val
+           if i != j:
+               result[j, i] = val
+
+       eigenvals = linalg.eigvalsh(result)
+       if np.min(eigenvals) < 1e-10:
+           min_eig = np.maximum(eigenvals.min(), 1e-10)
+           result += min_eig * np.eye(n)
+           
+   return result
     
         
     def get_shrinkage_estimate(
