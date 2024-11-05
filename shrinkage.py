@@ -232,34 +232,48 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
     return sigma, shrinkage
 
 def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> np.ndarray:
-   """Compute nonlinear shrinkage."""
-   returns, T, N = preprocess_returns(returns, demean)
-   
-   S = np.cov(returns, rowvar=False, ddof=1)
-   eigenvalues, eigenvectors = np.linalg.eigh(S)
-   eigenvalues = np.maximum(eigenvalues, 0)
-   
-   c = N / T
-   h = 0.9 * min(np.std(eigenvalues), stats.iqr(eigenvalues)/1.34) * N**(-0.2)
-   grid = np.linspace(max(0.0001, min(eigenvalues) + h), max(eigenvalues) + 4*h, 512)
-   density = stats.gaussian_kde(eigenvalues + h, bw_method=h)(grid)
-   
-   def hilbert_transform(x):
-       return np.mean(density / (grid - max(x, 0.0001)))
-       
-   d = np.zeros(N) 
-   base_shrinkage = np.trace(S) / (N * T)
-   
-   for i, x in enumerate(eigenvalues):
-       if x < base_shrinkage:
-           d[i] = base_shrinkage
-       else:
-           numer = x
-           denom = (np.pi * c * x * density[i])**2 + (1 - c - np.pi * c * x * hilbert_transform(x))**2
-           d[i] = numer / max(denom, base_shrinkage)
-           
-   sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
-   return (sigma + sigma.T) / 2
+    """Compute nonlinear shrinkage."""
+    returns, T, N = preprocess_returns(returns, demean)
+    
+    S = np.cov(returns, rowvar=False, ddof=1)
+    eigenvalues, eigenvectors = np.linalg.eigh(S)
+    eigenvalues = np.maximum(eigenvalues, 0)
+    
+    c = N / T
+    # More aggressive regularization floor based on matrix trace
+    base_shrinkage = np.trace(S) / (N * T) 
+    eigenvalues = np.maximum(eigenvalues, base_shrinkage)
+
+    # Adaptive bandwidth proportional to eigenvalue magnitudes
+    hn = T**(-1/3)  # Global bandwidth
+    hn_i = eigenvalues * hn  # Local bandwidths
+    
+    # Compute density estimate with proportional bandwidths
+    density = np.zeros(N)
+    for i in range(N):
+        weights = np.maximum(0, 1 - ((eigenvalues[i] - eigenvalues)/(5*hn_i))**2)
+        density[i] = np.sum(weights/(hn_i)) / (N * 4/3)
+
+    # Compute Hilbert transform with regularization
+    hilbert = np.zeros(N)
+    for i in range(N):
+        diff = eigenvalues[i] - eigenvalues
+        diff[abs(diff) < 1e-10] = 1e-10  # Prevent division by zero
+        kernel_vals = np.maximum(0, 1 - (diff/(5*hn_i))**2)
+        hilbert_kernel = -diff/(np.pi * diff**2) * kernel_vals
+        hilbert[i] = np.sum(hilbert_kernel)/(N * 4/3)
+    
+    # Compute optimal nonlinear shrinkage
+    d = np.zeros(N)
+    for i in range(N):
+        numer = eigenvalues[i]
+        denom = (np.pi * c * eigenvalues[i] * density[i])**2 + (1 - c - np.pi * c * eigenvalues[i] * hilbert[i])**2
+        # Aggressive floor using both base_shrinkage and minimum eigenvalue
+        d[i] = numer / max(denom, base_shrinkage * (1 + c))
+        d[i] = max(d[i], base_shrinkage)
+        
+    sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
+    return (sigma + sigma.T) / 2
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
