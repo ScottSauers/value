@@ -42,7 +42,14 @@ def determine_separator(file_path: str) -> str:
     else:
         raise ValueError(f"Could not determine consistent delimiter for {file_path}")
 
-def load_price_data(file_path: str, start_date: str) -> pd.DataFrame:
+def select_largest_stocks(df_prices: pd.DataFrame, n_stocks: int = 100) -> pd.DataFrame:
+    """Select the n largest stocks by average market value."""
+    # Calculate average price as proxy for size
+    avg_prices = df_prices.mean()
+    largest_stocks = avg_prices.nlargest(n_stocks).index
+    return df_prices[largest_stocks]
+
+def load_price_data(file_path: str, start_date: str, n_stocks: int = 100) -> pd.DataFrame:
     """Load and preprocess price data from file."""
     debug_print(f"Reading file: {file_path}")
     
@@ -73,92 +80,66 @@ def load_price_data(file_path: str, start_date: str) -> pd.DataFrame:
     valid_cols = pct_missing[pct_missing < 0.01].index
     df_prices = df_prices[valid_cols]
     
+    # Select largest stocks
+    df_prices = select_largest_stocks(df_prices, n_stocks)
+    
     # Forward fill remaining missing values
-    df_prices = df_prices.fillna(method='ffill')
+    df_prices = df_prices.ffill().bfill()  # Using direct method calls instead of fillna
     
     debug_print("Price data after cleaning", df_prices.shape)
     return df_prices
 
 def calculate_returns(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate returns from price data."""
-    # Fill any remaining NAs before calculating returns
-    df_filled = df.fillna(method='ffill').fillna(method='bfill')
-    
-    # Calculate returns with explicit fill_method=None since we pre-filled
-    returns = df_filled.pct_change(fill_method=None).dropna()
+    returns = df.pct_change(fill_method=None)  # Explicit fill_method=None
     returns.columns = [col.replace('_close', '') for col in returns.columns]
     
-    # Remove any infinite values
+    # Remove any infinite values and first row (which will be NaN)
+    returns = returns.iloc[1:]
     returns = returns.replace([np.inf, -np.inf], np.nan)
-    returns = returns.dropna()
+    returns = returns.dropna(how='any')
     
     debug_print("Returns data shape", returns.shape)
     debug_print("Returns summary stats", returns.describe())
     
     return returns
 
-def calculate_shrinkage_covariance(
-    returns: pd.DataFrame,
-    method: str = 'nonlinear',
-    market_returns: Optional[np.ndarray] = None,
-    demean: bool = True
-) -> Union[Tuple[pd.DataFrame, float], pd.DataFrame]:
-    """Calculate covariance matrix using shrinkage estimation."""
-    returns_array = returns.values
-    
-    result = shrinkage_estimation(
-        returns=returns_array,
-        method=method,
-        market_returns=market_returns,
-        demean=demean
-    )
-    
-    if isinstance(result, tuple):
-        cov_matrix, shrinkage = result
-        cov_df = pd.DataFrame(
-            cov_matrix, 
-            index=returns.columns,
-            columns=returns.columns
-        )
-        return cov_df, shrinkage
-    else:
-        cov_df = pd.DataFrame(
-            result,
-            index=returns.columns,
-            columns=returns.columns
-        )
-        return cov_df
-
 def minimum_variance_portfolio(cov_matrix: pd.DataFrame) -> pd.Series:
-    """
-    Calculate minimum variance portfolio weights with improved numerical stability.
-    """
+    """Calculate minimum variance portfolio weights with improved numerical stability."""
+    n = len(cov_matrix)
+    
     try:
-        n = len(cov_matrix)
+        # Add small diagonal matrix to ensure positive definiteness
+        epsilon = 1e-8 * np.trace(cov_matrix) / n
+        regularized_cov = cov_matrix.values + epsilon * np.eye(n)
+        
+        # Solve the system with regularization
         ones = np.ones(n)
+        weights = linalg.solve(regularized_cov, ones, assume_a='pos')
+        weights = weights / np.sum(weights)
         
-        # Use scipy's more stable solver instead of direct inversion
-        weights = linalg.solve(cov_matrix.values, ones, assume_a='pos')
-        weights = weights / np.sum(weights)  # Normalize to sum to 1
+        # Additional checks
+        if np.any(np.abs(weights) > 5) or np.any(np.isnan(weights)):
+            raise ValueError("Unstable weights detected")
         
-        # Check for reasonable weights
-        if np.any(np.abs(weights) > 10):  # Arbitrary threshold for "too extreme"
-            raise ValueError("Extreme weights detected")
-            
         return pd.Series(weights, index=cov_matrix.index)
         
     except Exception as e:
         debug_print(f"Error in minimum_variance_portfolio: {str(e)}")
-        # Fall back to equal weights if optimization fails
-        n = len(cov_matrix)
+        # Return equal weights portfolio
         return pd.Series(np.ones(n) / n, index=cov_matrix.index)
 
 def portfolio_variance(weights: pd.Series, cov_matrix: pd.DataFrame) -> float:
     """Calculate portfolio variance with error checking."""
     try:
+        # Ensure alignment
+        weights = weights.reindex(cov_matrix.index)
         var = weights @ cov_matrix @ weights
-        if np.isnan(var) or np.isinf(var):
+        
+        # Sanity checks
+        if np.isnan(var) or np.isinf(var) or var < 0:
             raise ValueError("Invalid variance calculated")
+        
         return var
     except Exception as e:
         debug_print(f"Error calculating portfolio variance: {str(e)}")
@@ -166,13 +147,12 @@ def portfolio_variance(weights: pd.Series, cov_matrix: pd.DataFrame) -> float:
 
 def evaluate_out_of_sample(
     returns: pd.DataFrame,
-    estimation_window: int = 252,  # 1 year of daily data
-    prediction_window: int = 63,   # 3 months
+    estimation_window: int = 252,  # 1 year
+    prediction_window: int = 21,   # 1 month (changed from 3 months)
+    min_periods: int = 200,        # Minimum required periods
     methods: list = ['identity', 'const_corr', 'single_factor', 'nonlinear']
 ) -> Dict[str, list]:
-    """
-    Evaluate shrinkage methods using out-of-sample portfolio variance.
-    """
+    """Evaluate shrinkage methods using out-of-sample portfolio variance."""
     results = {method: [] for method in methods}
     results['sample'] = []
     
@@ -189,35 +169,31 @@ def evaluate_out_of_sample(
         est_returns = returns.iloc[t:t+estimation_window]
         val_returns = returns.iloc[t+estimation_window:t+estimation_window+prediction_window]
         
-        # Skip if we have too few observations in either window
-        if len(est_returns) < estimation_window/2 or len(val_returns) < prediction_window/2:
+        # Skip if we have insufficient data
+        if len(est_returns) < min_periods:
             debug_print("Skipping window due to insufficient data")
             continue
-            
+        
         # Calculate realized covariance
         realized_cov = val_returns.cov()
         
-        # Sample covariance
-        try:
-            sample_cov = est_returns.cov()
-            w_sample = minimum_variance_portfolio(sample_cov)
-            realized_var_sample = portfolio_variance(w_sample, realized_cov)
-            results['sample'].append(realized_var_sample)
-        except Exception as e:
-            debug_print(f"Error with sample covariance: {str(e)}")
-            results['sample'].append(np.nan)
-        
-        # Shrinkage methods
-        for method in methods:
+        # Evaluate each method
+        for method in ['sample'] + methods:
             try:
-                cov_est = calculate_shrinkage_covariance(est_returns, method=method)
-                if isinstance(cov_est, tuple):
-                    cov_est = cov_est[0]
+                # Get covariance estimate
+                if method == 'sample':
+                    cov_est = est_returns.cov()
+                else:
+                    cov_est = calculate_shrinkage_covariance(est_returns, method=method)
+                    if isinstance(cov_est, tuple):
+                        cov_est = cov_est[0]
                 
+                # Calculate portfolio weights and realized variance
                 weights = minimum_variance_portfolio(cov_est)
                 realized_var = portfolio_variance(weights, realized_cov)
-                results[method].append(realized_var)
                 
+                # Store result
+                results[method].append(realized_var)
                 debug_print(f"Method {method} - realized variance: {realized_var}")
                 
             except Exception as e:
@@ -231,24 +207,22 @@ def main():
         debug_print("Starting main execution")
         base_dir = Path("data/transformed")
         
-        # Find latest price files
         daily_files = list(base_dir.glob("price_data_1d_*.csv"))
-        
         if not daily_files:
             raise ValueError("No daily price data files found")
-        
+            
         latest_daily = max(daily_files)
         
-        # Use 6 years of data (5 for estimation, 1 for validation)
-        start_date = (pd.Timestamp.now() - pd.Timedelta(days=2190)).strftime('%Y-%m-%d')
+        # Use 3 years of data
+        start_date = (pd.Timestamp.now() - pd.Timedelta(days=1095)).strftime('%Y-%m-%d')
         
-        # Load and process data
-        df_prices = load_price_data(str(latest_daily), start_date)
+        # Load and process data (using only top 100 stocks)
+        df_prices = load_price_data(str(latest_daily), start_date, n_stocks=100)
         returns = calculate_returns(df_prices)
         
         debug_print("Final returns data shape before evaluation", returns.shape)
         
-        # Evaluate all methods out-of-sample
+        # Evaluate methods
         methods = ['identity', 'const_corr', 'single_factor', 'nonlinear']
         results = evaluate_out_of_sample(returns, methods=methods)
         
