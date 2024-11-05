@@ -221,7 +221,7 @@ class CovarianceEvaluator:
         est_cov: np.ndarray,
         true_cov: np.ndarray,
         est_returns: pd.DataFrame,
-        val_returns: pd.DataFrame
+        val_returns: pd.DataFrame,
         method: str
     ) -> dict:
         """Calculate comprehensive evaluation metrics."""
