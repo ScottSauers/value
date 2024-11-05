@@ -266,6 +266,7 @@ class CovarianceEvaluator:
             metrics['real_var'] = real_var
             metrics['var_ratio'] = real_var / pred_var
 
+            print(f"evaluate_estimation section:")
             print(f"Predicted portfolio variance: {pred_var:.6f}")
             print(f"Realized portfolio variance: {real_var:.6f}")
             print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
