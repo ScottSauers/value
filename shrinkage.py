@@ -375,46 +375,36 @@ def rscm_shrinkage(returns: np.ndarray):
 
     return RSCM
 
-def dual_shrinkage(returns: np.ndarray, ridge_alpha: float, lasso_alpha: float) -> np.ndarray:
+def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
     Apply dual shrinkage: ridge on diagonal elements and lasso on off-diagonal elements
     for covariance matrix estimation.
     
     Args:
         returns: T x N matrix of returns (T observations, N variables)
-        ridge_alpha: Regularization strength for ridge regression (diagonal elements)
-        lasso_alpha: Regularization strength for lasso regression (off-diagonal elements)
     
     Returns:
         Regularized covariance matrix.
     """
+    ridge_alpha = 0.1  # Ridge strength
+    lasso_alpha = 0.05  # Lasso strength
+    
     # Calculate the sample covariance matrix
     sample_cov = np.cov(returns, rowvar=False, ddof=1)
     N = sample_cov.shape[0]
     
-    # Apply ridge regularization to the diagonal elements
+    # Apply ridge regularization to diagonal
     ridge_cov = sample_cov.copy()
-    for i in range(N):
-        ridge_cov[i, i] += ridge_alpha
-
-    # Apply lasso regularization to off-diagonal elements
-    regularized_cov = np.zeros_like(sample_cov)
+    np.fill_diagonal(ridge_cov, np.diag(sample_cov) + ridge_alpha)
     
-    for i in range(N):
-        y = sample_cov[i, :]
-        y[i] = 0  # Exclude diagonal element from lasso
-        X = np.delete(sample_cov, i, axis=1)  # All rows without i-th column
-        
-        # Run lasso on the off-diagonal elements to regularize covariances
-        lasso = Lasso(alpha=lasso_alpha, fit_intercept=False, max_iter=10000)
-        lasso.fit(X, y)
-        
-        # Set regularized off-diagonal entries
-        regularized_cov[i, i] = ridge_cov[i, i]  # Diagonal from ridge
-        regularized_cov[i, :i] = lasso.coef_[:i]
-        regularized_cov[i, i+1:] = lasso.coef_[i:]
-        
-    # Make the matrix symmetric
+    # Apply lasso regularization to all off-diagonal elements at once
+    off_diag = sample_cov - np.diag(np.diag(sample_cov))
+    lasso = Lasso(alpha=lasso_alpha, fit_intercept=False, max_iter=10000)
+    lasso.fit(off_diag.reshape(-1, 1), off_diag.flatten())
+    regularized_off_diag = lasso.coef_.reshape(N, N)
+
+    # Construct regularized covariance matrix
+    regularized_cov = ridge_cov + regularized_off_diag
     regularized_cov = (regularized_cov + regularized_cov.T) / 2
 
     return regularized_cov
@@ -459,7 +449,7 @@ def shrinkage_estimation(returns: np.ndarray,
         return rscm_shrinkage(returns)
 
     elif method == 'dual_shrinkage':
-        return dual_shrinkage(returns, ridge_alpha=0.1, lasso_alpha=0.05)
+        return dual_shrinkage(returns)
 
     else:  # nonlinear
         return nonlinear_analytical_shrinkage(returns, demean)
