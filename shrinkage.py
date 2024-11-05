@@ -63,15 +63,23 @@ def linear_shrinkage_identity(returns: np.ndarray,
     # Frobenius norm
     d2 = np.sum((S - F) ** 2)
     
-    # Estimate optimal shrinkage intensity
-    b2 = np.mean(returns**2) ** 2
-    b2 = min(b2, d2)
-    shrinkage = b2 / d2
+    # Estimate pi (sum of asymptotic variances)
+    Y = returns ** 2
+    phi_mat = (Y.T @ Y) / T - S ** 2
+    pi = np.sum(phi_mat)
+    
+    # Estimate rho (asymptotic covariance)
+    theta_mat = (returns ** 3).T @ returns / T
+    rho = np.sum(np.diag(phi_mat))
+    
+    # Compute optimal shrinkage intensity
+    shrinkage = max(0, min(1, (pi - rho) / (d2 * T)))
     
     # Compute estimator
     sigma = shrinkage * F + (1 - shrinkage) * S
     
     return sigma, shrinkage
+  
 
 def constant_correlation_target(returns: np.ndarray) -> np.ndarray:
     """
