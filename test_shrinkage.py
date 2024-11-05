@@ -1,6 +1,6 @@
 """
 Covariance Matrix Shrinkage Evaluation Framework.
-Implements rolling window evaluation of various shrinkage methods with proper time series handling.
+Implements rolling window evaluation of various shrinkage methods.
 """
 
 from pathlib import Path
