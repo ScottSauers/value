@@ -375,9 +375,6 @@ def rscm_shrinkage(returns: np.ndarray):
 
     return RSCM
 
-import numpy as np
-from hdbscan import HDBSCAN
-
 def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
     Estimate covariance matrix using HDBSCAN for structure detection and eigenvalue cleaning.
