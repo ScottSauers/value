@@ -258,7 +258,7 @@ def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> 
     sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
     return (sigma + sigma.T) / 2
 
-def rscm_shrinkage(X):
+def rscm_shrinkage(returns: np.ndarray):
     """
     Compute the Ell3-RSCM estimator.
 
@@ -268,6 +268,8 @@ def rscm_shrinkage(X):
     Output:
     RSCM: p x p regularized covariance matrix estimate.
     """
+
+    X = returns
 
     n, p = X.shape
 
