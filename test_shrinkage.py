@@ -224,71 +224,25 @@ class CovarianceEvaluator:
         val_returns: pd.DataFrame,
         method: str
     ) -> dict:
-        """Calculate comprehensive evaluation metrics."""
+        """Calculate direct covariance matrix comparison metrics."""
         metrics = {}
         
         # Matrix distance metrics
         metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
         
-        # Portfolio-based metrics
-        try:
-            # Construct minimum variance portfolio with improved conditioning
-            n = len(est_cov)
-            ones = np.ones(n)
-            
-            # More aggressive regularization
-            epsilon = 1e-6 * np.trace(est_cov) / n
-            reg_est_cov = est_cov + epsilon * np.eye(n)
-            
-            try:
-                # First try Cholesky decomposition
-                L = linalg.cholesky(reg_est_cov, lower=True)
-                weights = linalg.solve_triangular(L, ones, lower=True)
-                weights = linalg.solve_triangular(L.T, weights, lower=False)
-            except:
-                # If Cholesky fails, try eigen-decomposition based regularization
-                eigenvals, eigenvecs = linalg.eigh(reg_est_cov)
-                min_eig = np.maximum(eigenvals.min(), 1e-8)
-                reg_est_cov = reg_est_cov + (min_eig * np.eye(n))
-                weights = linalg.solve(reg_est_cov, ones, assume_a='pos')
-                
-            weights = weights / weights.sum()
-            
-            # Check for numerical stability
-            if np.any(np.abs(weights) > 10) or np.any(np.isnan(weights)):
-                raise ValueError("Unstable weights detected")
-            
-            # Calculate predicted vs realized risk
-            pred_var = weights @ est_cov @ weights
-            real_var = weights @ true_cov @ weights
-            
-            metrics['pred_var'] = pred_var
-            metrics['real_var'] = real_var
-            metrics['var_ratio'] = real_var / pred_var
-
-            print(f"evaluate_estimation section:")
-            print(f"Predicted portfolio variance: {pred_var:.6f}")
-            print(f"Realized portfolio variance: {real_var:.6f}")
-            print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
-            print(f"Perfect prediction would be 1.000\n")
-
-            # Add portfolio properties
-            metrics['max_weight'] = np.abs(weights).max()
-            metrics['min_weight'] = np.abs(weights).min()
-            metrics['weight_std'] = weights.std()
-            
-        except Exception as e:
-            self.logger.print_and_log(f"Error in portfolio calculations for method {method}: {str(e)}")
-            metrics.update({
-                'pred_var': np.nan,
-                'real_var': np.nan,
-                'var_ratio': np.nan,
-                'max_weight': np.nan,
-                'min_weight': np.nan,
-                'weight_std': np.nan
-            })
+        # Direct variance ratio - element by element comparison
+        var_ratios = true_cov / est_cov
+        metrics['var_ratio'] = np.mean(var_ratios)  # average ratio across matrix
+        
+        # Maybe add other metrics here
+        
+        print(f"evaluate_estimation section:")
+        print(f"Frobenius norm: {metrics['frobenius']:.6f}")
+        print(f"Average variance ratio: {metrics['var_ratio']:.3f}")
+        print(f"Perfect prediction would be 1.000\n")
         
         return metrics
+
     
     def evaluate_rolling_windows(
         self,
