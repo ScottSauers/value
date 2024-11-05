@@ -262,13 +262,13 @@ class CovarianceEvaluator:
             metrics['pred_var'] = pred_var
             metrics['real_var'] = real_var
             metrics['var_ratio'] = real_var / pred_var
-            
-            # Calculate realized returns
-            port_rets = val_returns @ weights
-            metrics['realized_ret'] = port_rets.mean()
-            metrics['realized_std'] = port_rets.std()
-            metrics['realized_sharpe'] = metrics['realized_ret'] / metrics['realized_std'] if metrics['realized_std'] > 0 else 0
-            
+
+            print(f"\nMethod: {method}")
+            print(f"Predicted portfolio variance: {pred_var:.6f}")
+            print(f"Realized portfolio variance: {real_var:.6f}")
+            print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
+            print(f"Perfect prediction would be 1.000\n")
+
             # Add portfolio properties
             metrics['max_weight'] = np.abs(weights).max()
             metrics['min_weight'] = np.abs(weights).min()
@@ -280,9 +280,6 @@ class CovarianceEvaluator:
                 'pred_var': np.nan,
                 'real_var': np.nan,
                 'var_ratio': np.nan,
-                'realized_ret': np.nan,
-                'realized_std': np.nan,
-                'realized_sharpe': np.nan,
                 'max_weight': np.nan,
                 'min_weight': np.nan,
                 'weight_std': np.nan
@@ -402,8 +399,8 @@ class CovarianceEvaluator:
         summary_data = []
         
         metrics = [
-            'frobenius', 'var_ratio', 'realized_sharpe',
-            'pred_var', 'real_var', 'realized_ret', 'realized_std'
+            'frobenius', 'var_ratio',
+            'pred_var', 'real_var'
         ]
         
         for method, method_results in results.items():
