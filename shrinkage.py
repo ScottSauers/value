@@ -386,25 +386,30 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     Returns:
         Regularized covariance matrix.
     """
-    ridge_alpha = 0.1  # Ridge strength
-    lasso_alpha = 0.05  # Lasso strength
+    ridge_alpha = 0.1  # Ridge regularization for diagonal elements
+    lasso_alpha = 0.05  # Lasso regularization for off-diagonal elements
     
-    # Calculate the sample covariance matrix
+    # Calculate sample covariance matrix
     sample_cov = np.cov(returns, rowvar=False, ddof=1)
     N = sample_cov.shape[0]
     
-    # Apply ridge regularization to diagonal
-    ridge_cov = sample_cov.copy()
-    np.fill_diagonal(ridge_cov, np.diag(sample_cov) + ridge_alpha)
+    # Apply ridge regularization to the diagonal
+    regularized_cov = sample_cov.copy()
+    np.fill_diagonal(regularized_cov, np.diag(sample_cov) + ridge_alpha)
     
-    # Apply lasso regularization to all off-diagonal elements at once
-    off_diag = sample_cov - np.diag(np.diag(sample_cov))
+    # Extract and regularize off-diagonal elements using Lasso
+    off_diag_mask = ~np.eye(N, dtype=bool)
+    off_diag_values = sample_cov[off_diag_mask]
+    
+    # Lasso regularization on flattened off-diagonal values
     lasso = Lasso(alpha=lasso_alpha, fit_intercept=False, max_iter=10000)
-    lasso.fit(off_diag.reshape(-1, 1), off_diag.flatten())
-    regularized_off_diag = lasso.coef_.reshape(N, N)
+    lasso.fit(np.ones((len(off_diag_values), 1)), off_diag_values)
+    regularized_off_diag_values = lasso.coef_
+    
+    # Insert regularized off-diagonal values back into matrix
+    regularized_cov[off_diag_mask] = regularized_off_diag_values
 
-    # Construct regularized covariance matrix
-    regularized_cov = ridge_cov + regularized_off_diag
+    # Symmetrize the matrix
     regularized_cov = (regularized_cov + regularized_cov.T) / 2
 
     return regularized_cov
