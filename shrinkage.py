@@ -5,7 +5,7 @@ This module implements various shrinkage methods for estimating large-dimensiona
 covariance matrices.
 
 References:
-- Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. Journal of Multivariate Analysis.
+- Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices.
 - Ledoit, O., & Wolf, M. (2020). Analytical nonlinear shrinkage of large-dimensional covariance matrices.
 """
 
