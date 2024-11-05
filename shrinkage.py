@@ -404,7 +404,7 @@ def shrinkage_estimation(returns: np.ndarray,
         return linear_shrinkage_single_factor(returns, market_returns, demean)
 
     elif method == 'rscm_shrinkage':
-        return rscm_shrinkage(returns, demean)
+        return rscm_shrinkage(returns)
     
     else:  # nonlinear
         return nonlinear_analytical_shrinkage(returns, demean)
