@@ -1,286 +1,469 @@
+"""
+Covariance Matrix Shrinkage Evaluation Framework.
+Implements rolling window evaluation of various shrinkage methods with proper time series handling.
+"""
+
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from typing import Tuple, Optional, Union, Dict
-from shrinkage import linear_shrinkage_identity, linear_shrinkage_constant_correlation, linear_shrinkage_single_factor, nonlinear_analytical_shrinkage
+from typing import Tuple, Optional, Union, Dict, List
+from shrinkage import (
+    linear_shrinkage_identity, 
+    linear_shrinkage_constant_correlation,
+    linear_shrinkage_single_factor, 
+    nonlinear_analytical_shrinkage
+)
 import sys
 from scipy import linalg
+from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')  # Suppress warnings for cleaner output
 
-def debug_print(msg, data=None, max_lines=10):
-    """Debug printing function for monitoring execution."""
-    print(f"\nDEBUG: {msg}")
-    if data is not None:
-        if isinstance(data, pd.DataFrame):
-            print(f"Shape: {data.shape}")
-            print(f"First {max_lines} rows:")
-            print(data.head(max_lines))
-            print("\nData Info:")
-            print(data.info())
+class ResultLogger:
+    """Handles formatted printing of evaluation results."""
+    
+    def __init__(self, output_path: Optional[Path] = None):
+        self.output_path = output_path
+        self.log_entries = []
+        
+    def print_and_log(self, msg: str, data: Optional[Union[pd.DataFrame, dict, str]] = None):
+        """Print message and optionally associated data with formatting."""
+        border = "=" * 80
+        print(f"\n{border}")
+        print(msg)
+        
+        if data is not None:
+            if isinstance(data, pd.DataFrame):
+                print(f"\n{data}")
+                print(f"\nShape: {data.shape}")
+            elif isinstance(data, dict):
+                for k, v in data.items():
+                    print(f"{k}: {v}")
+            else:
+                print(data)
+        
+        print(f"{border}\n")
+        
+        # Store for potential file output
+        self.log_entries.append({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'message': msg,
+            'data': data
+        })
+    
+    def save_to_file(self):
+        """Save logged results to file if output path specified."""
+        if self.output_path:
+            with open(self.output_path, 'w') as f:
+                for entry in self.log_entries:
+                    f.write(f"\n{entry['timestamp']} - {entry['message']}\n")
+                    if entry['data'] is not None:
+                        f.write(f"{str(entry['data'])}\n")
+                        f.write("-" * 80 + "\n")
+
+class DataProcessor:
+    """Handles data loading and preprocessing."""
+    
+    @staticmethod
+    def determine_separator(file_path: str) -> str:
+        """Determine file separator by analyzing first few lines."""
+        with open(file_path, 'r') as f:
+            first_lines = [next(f) for _ in range(5)]
+        
+        delimiters = {
+            '\t': [len(line.split('\t')) for line in first_lines],
+            ',': [len(line.split(',')) for line in first_lines]
+        }
+        
+        consistent_counts = {
+            d: len(set(counts)) == 1 and counts[0] > 1
+            for d, counts in delimiters.items()
+        }
+        
+        if consistent_counts.get('\t'):
+            return '\t'
+        elif consistent_counts.get(','):
+            return ','
         else:
-            print(data)
-    sys.stdout.flush()
-
-def determine_separator(file_path: str) -> str:
-    """Determine the correct separator by comparing field counts."""
-    with open(file_path, 'r') as f:
-        first_lines = [next(f) for _ in range(5)]
+            raise ValueError(f"Could not determine consistent delimiter for {file_path}")
     
-    delimiters = {
-        '\t': [len(line.split('\t')) for line in first_lines],
-        ',': [len(line.split(',')) for line in first_lines]
-    }
-    
-    consistent_counts = {
-        d: len(set(counts)) == 1 and counts[0] > 1
-        for d, counts in delimiters.items()
-    }
-    
-    if consistent_counts.get('\t'):
-        return '\t'
-    elif consistent_counts.get(','):
-        return ','
-    else:
-        raise ValueError(f"Could not determine consistent delimiter for {file_path}")
-
-def select_largest_stocks(df_prices: pd.DataFrame, n_stocks: int = 100) -> pd.DataFrame:
-    """Select the n largest stocks by average market value."""
-    avg_prices = df_prices.mean()
-    largest_stocks = avg_prices.nlargest(n_stocks).index
-    return df_prices[largest_stocks]
-
-def load_price_data(file_path: str, start_date: str, n_stocks: int = 100) -> pd.DataFrame:
-    """Load and preprocess price data from file."""
-    debug_print(f"Reading file: {file_path}")
-    
-    sep = determine_separator(str(file_path))
-    debug_print(f"Detected separator: {repr(sep)}")
-    
-    df = pd.read_csv(
-        file_path,
-        sep=sep,
-        skipinitialspace=True,
-        dtype={'date': str}
-    )
-    
-    df['date'] = pd.to_datetime(df['date'])
-    df = df[df['date'] >= start_date].copy()
-    df.set_index('date', inplace=True)
-    
-    # Get price columns
-    price_cols = [col for col in df.columns if col.endswith('_close')]
-    if not price_cols:
-        raise ValueError("No price columns found in data")
-    
-    df_prices = df[price_cols].copy()
-    debug_print("Initial price data shape", df_prices.shape)
-    
-    # Remove companies with too many missing values
-    pct_missing = df_prices.isnull().mean()
-    valid_cols = pct_missing[pct_missing < 0.01].index
-    df_prices = df_prices[valid_cols]
-    
-    # Select largest stocks
-    df_prices = select_largest_stocks(df_prices, n_stocks)
-    
-    # Forward fill remaining missing values
-    df_prices = df_prices.ffill().bfill()
-    
-    debug_print("Price data after cleaning", df_prices.shape)
-    return df_prices
-
-def calculate_returns(df: pd.DataFrame) -> pd.DataFrame:
-    """Calculate returns from price data."""
-    returns = df.pct_change(fill_method=None)
-    returns.columns = [col.replace('_close', '') for col in returns.columns]
-    
-    # Remove any infinite values and first row (which will be NaN)
-    returns = returns.iloc[1:]
-    returns = returns.replace([np.inf, -np.inf], np.nan)
-    returns = returns.dropna(how='any')
-    
-    debug_print("Returns data shape", returns.shape)
-    debug_print("Returns summary stats", returns.describe())
-    
-    return returns
-
-def calculate_shrinkage_covariance(
-    returns: pd.DataFrame,
-    method: str = 'nonlinear',
-    market_returns: Optional[np.ndarray] = None,
-    demean: bool = True
-) -> Union[Tuple[pd.DataFrame, float], pd.DataFrame]:
-    """Calculate covariance matrix using shrinkage estimation."""
-    returns_array = returns.values
-    
-    # Choose appropriate shrinkage method
-    if method == 'identity':
-        result = linear_shrinkage_identity(returns_array, demean)
-    elif method == 'const_corr':
-        result = linear_shrinkage_constant_correlation(returns_array, demean)
-    elif method == 'single_factor':
-        result = linear_shrinkage_single_factor(returns_array, market_returns, demean)
-    else:  # nonlinear
-        result = nonlinear_analytical_shrinkage(returns_array, demean)
-    
-    # Convert result to DataFrame
-    if isinstance(result, tuple):
-        cov_matrix, shrinkage = result
-        cov_df = pd.DataFrame(
-            cov_matrix, 
-            index=returns.columns,
-            columns=returns.columns
+    @staticmethod
+    def load_price_data(
+        file_path: str,
+        start_date: str,
+        min_market_cap_pct: float = 0.5,  # Minimum percentile of average price
+        max_missing_pct: float = 0.01     # Maximum allowed missing data
+    ) -> Tuple[pd.DataFrame, dict]:
+        """
+        Load and clean price data with detailed statistics.
+        
+        Args:
+            file_path: Path to price data file
+            start_date: Start date for analysis
+            min_market_cap_pct: Minimum percentile of avg price to include
+            max_missing_pct: Maximum fraction of missing data allowed
+        
+        Returns:
+            Cleaned price DataFrame, statistics dictionary
+        """
+        stats = {}
+        
+        # Load data
+        sep = DataProcessor.determine_separator(str(file_path))
+        df = pd.read_csv(
+            file_path,
+            sep=sep,
+            skipinitialspace=True,
+            dtype={'date': str}
         )
-        return cov_df, shrinkage
-    else:
-        cov_df = pd.DataFrame(
-            result,
-            index=returns.columns,
-            columns=returns.columns
-        )
-        return cov_df
+        
+        stats['initial_shape'] = df.shape
+        
+        # Process dates
+        df['date'] = pd.to_datetime(df['date'])
+        df = df[df['date'] >= start_date].copy()
+        df.set_index('date', inplace=True)
+        
+        # Get price columns
+        price_cols = [col for col in df.columns if col.endswith('_close')]
+        if not price_cols:
+            raise ValueError("No price columns found in data")
+        
+        df_prices = df[price_cols].copy()
+        stats['price_columns'] = len(price_cols)
+        
+        # Calculate missing data percentages
+        missing_pct = df_prices.isnull().mean()
+        valid_cols = missing_pct[missing_pct < max_missing_pct].index
+        df_prices = df_prices[valid_cols]
+        
+        stats['removed_missing'] = len(price_cols) - len(valid_cols)
+        
+        # Select stocks above market cap threshold
+        avg_prices = df_prices.mean()
+        cutoff = np.percentile(avg_prices, min_market_cap_pct * 100)
+        large_caps = avg_prices[avg_prices >= cutoff].index
+        df_prices = df_prices[large_caps]
+        
+        stats['final_stocks'] = len(df_prices.columns)
+        
+        # Forward fill then backward fill remaining missing values
+        df_prices = df_prices.ffill().bfill()
+        
+        # Final checks
+        stats['final_shape'] = df_prices.shape
+        stats['missing_data_final'] = df_prices.isnull().sum().sum()
+        
+        return df_prices, stats
+    
+    @staticmethod
+    def calculate_returns(
+        prices: pd.DataFrame,
+        winsorize_pct: Optional[float] = 0.01  # Winsorize extreme returns
+    ) -> Tuple[pd.DataFrame, dict]:
+        """
+        Calculate returns with proper handling of outliers and missing data.
+        
+        Args:
+            prices: Price DataFrame
+            winsorize_pct: Percentile for winsorizing returns (None for no winsorization)
+            
+        Returns:
+            Returns DataFrame, statistics dictionary
+        """
+        stats = {}
+        
+        # Calculate returns
+        returns = prices.pct_change(fill_method=None)
+        returns.columns = [col.replace('_close', '') for col in returns.columns]
+        
+        # Remove first row (NaN from pct_change)
+        returns = returns.iloc[1:]
+        
+        # Handle extremes
+        if winsorize_pct:
+            lower = np.percentile(returns, winsorize_pct)
+            upper = np.percentile(returns, 100 - winsorize_pct)
+            returns = returns.clip(lower=lower, upper=upper)
+            
+            stats['winsorized_lower'] = lower
+            stats['winsorized_upper'] = upper
+        
+        # Remove any remaining invalid values
+        returns = returns.replace([np.inf, -np.inf], np.nan)
+        initial_rows = len(returns)
+        returns = returns.dropna(how='any')
+        
+        stats['rows_removed'] = initial_rows - len(returns)
+        stats['final_shape'] = returns.shape
+        
+        # Calculate basic statistics
+        stats['mean_return'] = returns.mean().mean()
+        stats['std_return'] = returns.std().mean()
+        
+        return returns, stats
 
-def minimum_variance_portfolio(cov_matrix: pd.DataFrame) -> pd.Series:
-    """Calculate minimum variance portfolio weights with improved numerical stability."""
-    n = len(cov_matrix)
+class CovarianceEvaluator:
+    """Evaluates covariance matrix estimation methods using rolling windows."""
     
-    try:
-        # Add small diagonal matrix to ensure positive definiteness
-        epsilon = 1e-8 * np.trace(cov_matrix) / n
-        regularized_cov = cov_matrix.values + epsilon * np.eye(n)
+    def __init__(self, logger: ResultLogger):
+        self.logger = logger
         
-        # Solve the system with regularization
-        ones = np.ones(n)
-        weights = linalg.solve(regularized_cov, ones, assume_a='pos')
-        weights = weights / np.sum(weights)
-        
-        # Additional checks
-        if np.any(np.abs(weights) > 5) or np.any(np.isnan(weights)):
-            raise ValueError("Unstable weights detected")
-        
-        return pd.Series(weights, index=cov_matrix.index)
-        
-    except Exception as e:
-        debug_print(f"Error in minimum_variance_portfolio: {str(e)}")
-        # Return equal weights portfolio
-        return pd.Series(np.ones(n) / n, index=cov_matrix.index)
-
-def portfolio_variance(weights: pd.Series, cov_matrix: pd.DataFrame) -> float:
-    """Calculate portfolio variance with error checking."""
-    try:
-        # Ensure alignment
-        weights = weights.reindex(cov_matrix.index)
-        var = weights @ cov_matrix @ weights
-        
-        # Sanity checks
-        if np.isnan(var) or np.isinf(var) or var < 0:
-            raise ValueError("Invalid variance calculated")
-        
-        return var
-    except Exception as e:
-        debug_print(f"Error calculating portfolio variance: {str(e)}")
-        return np.nan
-
-def evaluate_out_of_sample(
-    returns: pd.DataFrame,
-    estimation_window: int = 252,  # 1 year
-    prediction_window: int = 21,   # 1 month
-    min_periods: int = 200,        # Minimum required periods
-    methods: list = ['identity', 'const_corr', 'single_factor', 'nonlinear']
-) -> Dict[str, list]:
-    """Evaluate shrinkage methods using out-of-sample portfolio variance."""
-    results = {method: [] for method in methods}
-    results['sample'] = []
+    def frobenius_norm(self, est_cov: np.ndarray, true_cov: np.ndarray) -> float:
+        """Calculate Frobenius norm between estimated and realized covariance."""
+        diff = est_cov - true_cov
+        return np.sqrt(np.sum(diff * diff))
     
-    # Ensure we have enough data
-    if len(returns) < estimation_window + prediction_window:
-        raise ValueError("Not enough data for out-of-sample evaluation")
+    def evaluate_estimation(
+        self,
+        est_cov: np.ndarray,
+        true_cov: np.ndarray,
+        est_returns: pd.DataFrame,
+        val_returns: pd.DataFrame
+    ) -> dict:
+        """Calculate comprehensive evaluation metrics."""
+        metrics = {}
+        
+        # 1. Matrix distance metrics
+        metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
+        
+        # 2. Portfolio-based metrics
+        try:
+            # Construct minimum variance portfolio
+            n = len(est_cov)
+            ones = np.ones(n)
+            
+            # Add small regularization for numerical stability
+            epsilon = 1e-8 * np.trace(est_cov) / n
+            reg_est_cov = est_cov + epsilon * np.eye(n)
+            
+            # Calculate weights
+            weights = linalg.solve(reg_est_cov, ones, assume_a='pos')
+            weights = weights / weights.sum()
+            
+            # Calculate predicted vs realized risk
+            pred_var = weights @ est_cov @ weights
+            real_var = weights @ true_cov @ weights
+            
+            metrics['pred_var'] = pred_var
+            metrics['real_var'] = real_var
+            metrics['var_ratio'] = real_var / pred_var
+            
+            # Calculate realized returns
+            port_rets = val_returns @ weights
+            metrics['realized_ret'] = port_rets.mean()
+            metrics['realized_std'] = port_rets.std()
+            metrics['realized_sharpe'] = metrics['realized_ret'] / metrics['realized_std']
+            
+        except Exception as e:
+            self.logger.print_and_log(f"Error in portfolio calculations: {str(e)}")
+            metrics.update({
+                'pred_var': np.nan,
+                'real_var': np.nan,
+                'var_ratio': np.nan,
+                'realized_ret': np.nan,
+                'realized_std': np.nan,
+                'realized_sharpe': np.nan
+            })
+        
+        return metrics
     
-    debug_print(f"Starting evaluation with {len(returns)} periods of data")
+    def evaluate_rolling_windows(
+        self,
+        returns: pd.DataFrame,
+        train_window: int = 252,  # 1 year
+        test_window: int = 252,   # 1 year test
+        min_periods: int = 200,
+        methods: list = ['identity', 'const_corr', 'single_factor', 'nonlinear']
+    ) -> Tuple[pd.DataFrame, Dict[str, List[dict]]]:
+        """
+        Evaluate methods using rolling windows of train/test data.
+        
+        Args:
+            returns: Returns DataFrame
+            train_window: Training window length
+            test_window: Testing window length
+            min_periods: Minimum required periods
+            methods: List of methods to evaluate
+            
+        Returns:
+            Summary DataFrame, detailed results dictionary
+        """
+        self.logger.print_and_log("Starting rolling window evaluation")
+        
+        results = {method: [] for method in methods + ['sample']}
+        window_info = []
+        
+        # Rolling windows
+        for t in range(0, len(returns) - train_window - test_window + 1, test_window):
+            train_start = returns.index[t]
+            train_end = returns.index[t + train_window - 1]
+            test_end = returns.index[min(t + train_window + test_window - 1, len(returns) - 1)]
+            
+            window_info.append({
+                'train_start': train_start,
+                'train_end': train_end,
+                'test_end': test_end
+            })
+            
+            self.logger.print_and_log(
+                f"Window {len(window_info)}: "
+                f"Train {train_start.strftime('%Y-%m-%d')} to {train_end.strftime('%Y-%m-%d')}, "
+                f"Test until {test_end.strftime('%Y-%m-%d')}"
+            )
+            
+            # Split data
+            train_rets = returns.loc[train_start:train_end]
+            test_rets = returns.loc[train_end:test_end]
+            
+            if len(train_rets) < min_periods:
+                self.logger.print_and_log("Insufficient data in window")
+                continue
+            
+            # Calculate realized covariance
+            true_cov = test_rets.cov().values
+            
+            # Evaluate each method
+            for method in ['sample'] + methods:
+                try:
+                    # Get covariance estimate
+                    if method == 'sample':
+                        est_cov = train_rets.cov().values
+                    else:
+                        est_cov = self.get_shrinkage_estimate(train_rets, method)
+                    
+                    # Calculate metrics
+                    metrics = self.evaluate_estimation(
+                        est_cov, true_cov, train_rets, test_rets
+                    )
+                    
+                    metrics['window'] = len(window_info)
+                    metrics['method'] = method
+                    results[method].append(metrics)
+                    
+                except Exception as e:
+                    self.logger.print_and_log(f"Error evaluating {method}: {str(e)}")
+        
+        # Create summary
+        summary = self.create_summary(results, window_info)
+        
+        return summary, results
     
-    for t in range(0, len(returns) - estimation_window - prediction_window, prediction_window):
-        debug_print(f"Evaluation window starting at period {t}")
+    def get_shrinkage_estimate(
+        self,
+        returns: pd.DataFrame,
+        method: str,
+        demean: bool = True
+    ) -> np.ndarray:
+        """Get covariance estimate using specified shrinkage method."""
+        returns_array = returns.values
         
-        # Split data
-        est_returns = returns.iloc[t:t+estimation_window]
-        val_returns = returns.iloc[t+estimation_window:t+estimation_window+prediction_window]
+        if method == 'identity':
+            est_cov, _ = linear_shrinkage_identity(returns_array, demean)
+        elif method == 'const_corr':
+            est_cov, _ = linear_shrinkage_constant_correlation(returns_array, demean)
+        elif method == 'single_factor':
+            est_cov, _ = linear_shrinkage_single_factor(returns_array, None, demean)
+        elif method == 'nonlinear':
+            est_cov = nonlinear_analytical_shrinkage(returns_array, demean)
+        else:
+            raise ValueError(f"Unknown method: {method}")
         
-        # Skip if we have insufficient data
-        if len(est_returns) < min_periods:
-            debug_print("Skipping window due to insufficient data")
-            continue
+        return est_cov
+    
+    def create_summary(
+        self,
+        results: Dict[str, List[dict]],
+        window_info: List[dict]
+    ) -> pd.DataFrame:
+        """Create summary DataFrame from detailed results."""
+        summary_data = []
         
-        # Calculate realized covariance
-        realized_cov = val_returns.cov()
+        metrics = [
+            'frobenius', 'var_ratio', 'realized_sharpe',
+            'pred_var', 'real_var', 'realized_ret', 'realized_std'
+        ]
         
-        # Evaluate each method
-        for method in ['sample'] + methods:
-            try:
-                # Get covariance estimate
-                if method == 'sample':
-                    cov_est = est_returns.cov()
+        for method, method_results in results.items():
+            method_summary = {'method': method}
+            
+            for metric in metrics:
+                values = [r[metric] for r in method_results if metric in r]
+                values = np.array(values)[~np.isnan(values)]
+                
+                if len(values) > 0:
+                    method_summary[f'{metric}_mean'] = np.mean(values)
+                    method_summary[f'{metric}_std'] = np.std(values)
                 else:
-                    cov_est = calculate_shrinkage_covariance(est_returns, method=method)
-                    if isinstance(cov_est, tuple):
-                        cov_est = cov_est[0]
-                
-                # Calculate portfolio weights and realized variance
-                weights = minimum_variance_portfolio(cov_est)
-                realized_var = portfolio_variance(weights, realized_cov)
-                
-                # Store result
-                results[method].append(realized_var)
-                debug_print(f"Method {method} - realized variance: {realized_var}")
-                
-            except Exception as e:
-                debug_print(f"Error with method {method}: {str(e)}")
-                results[method].append(np.nan)
-    
-    return results
+                    method_summary[f'{metric}_mean'] = np.nan
+                    method_summary[f'{metric}_std'] = np.nan
+            
+            summary_data.append(method_summary)
+        
+        summary_df = pd.DataFrame(summary_data)
+        return summary_df.set_index('method')
 
 def main():
+    """Main execution function."""
     try:
-        debug_print("Starting main execution")
-        base_dir = Path("data/transformed")
+        # Initialize logger
+        logger = ResultLogger(Path("data/transformed/evaluation_log.txt"))
+        logger.print_and_log("Starting covariance estimation evaluation")
         
+        # Find latest data file
+        base_dir = Path("data/transformed")
         daily_files = list(base_dir.glob("price_data_1d_*.csv"))
+        
         if not daily_files:
             raise ValueError("No daily price data files found")
-            
+        
         latest_daily = max(daily_files)
+        logger.print_and_log(f"Using data file: {latest_daily}")
         
-        # Use 3 years of data
-        start_date = (pd.Timestamp.now() - pd.Timedelta(days=1095)).strftime('%Y-%m-%d')
+        # Load and process data
+        start_date = (datetime.now() - timedelta(days=1825)).strftime('%Y-%m-%d')  # 5 years
+        df_prices, price_stats = DataProcessor.load_price_data(
+            str(latest_daily),
+            start_date,
+            min_market_cap_pct=0.5,
+            max_missing_pct=0.01
+        )
         
-        # Load and process data (using only top 100 stocks)
-        df_prices = load_price_data(str(latest_daily), start_date, n_stocks=100)
-        returns = calculate_returns(df_prices)
+        logger.print_and_log("Price data statistics:", price_stats)
         
-        debug_print("Final returns data shape before evaluation", returns.shape)
+        returns, return_stats = DataProcessor.calculate_returns(
+            df_prices,
+            winsorize_pct=0.01
+        )
         
-        # Evaluate methods
+        logger.print_and_log("Returns statistics:", return_stats)
+        
+        # Initialize evaluator
+        evaluator = CovarianceEvaluator(logger)
+        
+        # Run evaluation
         methods = ['identity', 'const_corr', 'single_factor', 'nonlinear']
-        results = evaluate_out_of_sample(returns, methods=methods)
+        summary, detailed_results = evaluator.evaluate_rolling_windows(
+            returns,
+            train_window=252,    # 1 year training
+            test_window=252,     # 1 year testing
+            min_periods=200,
+            methods=methods
+        )
         
-        # Calculate summary statistics
-        summary = pd.DataFrame({
-            method: {
-                'Mean Variance': np.nanmean(variances),
-                'Std Variance': np.nanstd(variances),
-                'Success Rate': np.mean(~np.isnan(variances)),
-                'Sharpe Ratio': np.nanmean(variances) / np.nanstd(variances)
-            }
-            for method, variances in results.items()
-        })
+        # Print and save results
+        logger.print_and_log("\nEvaluation Summary:", summary)
         
-        print("\nOut-of-Sample Performance Summary:")
-        print(summary)
+        # Save detailed results
+        results_file = base_dir / 'covariance_evaluation.csv'
+        summary.to_csv(results_file)
+        logger.print_and_log(f"\nDetailed results saved to: {results_file}")
         
-        # Save results
-        summary.to_csv(base_dir / 'shrinkage_comparison.csv')
-        print(f"\nResults saved to {base_dir / 'shrinkage_comparison.csv'}")
+        # Save log
+        logger.save_to_file()
         
     except Exception as e:
-        print(f"Error in main: {str(e)}")
+        print(f"Error in main execution: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
