@@ -390,7 +390,7 @@ class CovarianceEvaluator:
         elif method == 'single_factor':
             est_cov, _ = linear_shrinkage_single_factor(returns_array, None, demean)
         elif method == 'rscm':
-            est_cov, _ = rscm_shrinkage(returns_array, demean)
+            est_cov, _ = rscm_shrinkage(returns_array)
         elif method == 'nonlinear':
             est_cov = nonlinear_analytical_shrinkage(returns_array, demean)
         else:
