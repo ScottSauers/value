@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from typing import Tuple, Optional, Union, Dict
-from shrinkage import shrinkage_estimation
+from shrinkage import linear_shrinkage_identity, linear_shrinkage_constant_correlation, linear_shrinkage_single_factor, nonlinear_analytical_shrinkage
 import sys
 from scipy import linalg
 
@@ -44,7 +44,6 @@ def determine_separator(file_path: str) -> str:
 
 def select_largest_stocks(df_prices: pd.DataFrame, n_stocks: int = 100) -> pd.DataFrame:
     """Select the n largest stocks by average market value."""
-    # Calculate average price as proxy for size
     avg_prices = df_prices.mean()
     largest_stocks = avg_prices.nlargest(n_stocks).index
     return df_prices[largest_stocks]
@@ -84,14 +83,14 @@ def load_price_data(file_path: str, start_date: str, n_stocks: int = 100) -> pd.
     df_prices = select_largest_stocks(df_prices, n_stocks)
     
     # Forward fill remaining missing values
-    df_prices = df_prices.ffill().bfill()  # Using direct method calls instead of fillna
+    df_prices = df_prices.ffill().bfill()
     
     debug_print("Price data after cleaning", df_prices.shape)
     return df_prices
 
 def calculate_returns(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate returns from price data."""
-    returns = df.pct_change(fill_method=None)  # Explicit fill_method=None
+    returns = df.pct_change(fill_method=None)
     returns.columns = [col.replace('_close', '') for col in returns.columns]
     
     # Remove any infinite values and first row (which will be NaN)
@@ -103,6 +102,42 @@ def calculate_returns(df: pd.DataFrame) -> pd.DataFrame:
     debug_print("Returns summary stats", returns.describe())
     
     return returns
+
+def calculate_shrinkage_covariance(
+    returns: pd.DataFrame,
+    method: str = 'nonlinear',
+    market_returns: Optional[np.ndarray] = None,
+    demean: bool = True
+) -> Union[Tuple[pd.DataFrame, float], pd.DataFrame]:
+    """Calculate covariance matrix using shrinkage estimation."""
+    returns_array = returns.values
+    
+    # Choose appropriate shrinkage method
+    if method == 'identity':
+        result = linear_shrinkage_identity(returns_array, demean)
+    elif method == 'const_corr':
+        result = linear_shrinkage_constant_correlation(returns_array, demean)
+    elif method == 'single_factor':
+        result = linear_shrinkage_single_factor(returns_array, market_returns, demean)
+    else:  # nonlinear
+        result = nonlinear_analytical_shrinkage(returns_array, demean)
+    
+    # Convert result to DataFrame
+    if isinstance(result, tuple):
+        cov_matrix, shrinkage = result
+        cov_df = pd.DataFrame(
+            cov_matrix, 
+            index=returns.columns,
+            columns=returns.columns
+        )
+        return cov_df, shrinkage
+    else:
+        cov_df = pd.DataFrame(
+            result,
+            index=returns.columns,
+            columns=returns.columns
+        )
+        return cov_df
 
 def minimum_variance_portfolio(cov_matrix: pd.DataFrame) -> pd.Series:
     """Calculate minimum variance portfolio weights with improved numerical stability."""
@@ -148,7 +183,7 @@ def portfolio_variance(weights: pd.Series, cov_matrix: pd.DataFrame) -> float:
 def evaluate_out_of_sample(
     returns: pd.DataFrame,
     estimation_window: int = 252,  # 1 year
-    prediction_window: int = 21,   # 1 month (changed from 3 months)
+    prediction_window: int = 21,   # 1 month
     min_periods: int = 200,        # Minimum required periods
     methods: list = ['identity', 'const_corr', 'single_factor', 'nonlinear']
 ) -> Dict[str, list]:
