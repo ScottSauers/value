@@ -424,22 +424,22 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     
     # Handle noise assets
     if len(noise_idx) > 0:
-        market_return = np.mean(returns, axis=1)
-        market_var = np.var(market_return)
+        market_returns = np.mean(returns, axis=1, keepdims=True)
         
         for idx in noise_idx:
             # Keep variance
             result[idx, idx] = sample_cov[idx, idx]
             
             # Calculate and shrink market exposure
-            beta = np.cov(returns[:, idx], market_return)[0,1] / market_var
-            shrunk_beta = 0.1 * beta  # strong shrinkage
+            asset_returns = returns[:, idx].reshape(-1, 1)
+            beta = np.cov(asset_returns.T, market_returns.T)[0,1] / np.var(market_returns)
+            shrunk_beta = 0.1 * beta
             
-            # Apply to non-noise assets
             if len(non_noise_idx) > 0:
-                cov_with_market = shrunk_beta * np.cov(market_return, returns[:, non_noise_idx])[0, 1:]
-                result[idx, non_noise_idx] = cov_with_market
-                result[non_noise_idx, idx] = cov_with_market
+                for non_noise_i in non_noise_idx:
+                    cov_value = shrunk_beta * sample_cov[non_noise_i, idx]
+                    result[idx, non_noise_i] = cov_value
+                    result[non_noise_i, idx] = cov_value
     
     # Symmetry
     result = (result + result.T) / 2
