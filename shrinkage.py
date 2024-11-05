@@ -378,7 +378,8 @@ def rscm_shrinkage(returns: np.ndarray):
 def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
     Apply shrinkage to a covariance matrix by preserving the diagonal and replacing
-    all off-diagonal elements with the overall mean of off-diagonals.
+    all off-diagonal elements with the overall mean of off-diagonals, with an added
+    small regularization term to the diagonal for numerical stability.
     
     Args:
         returns: T x N matrix of returns (T observations, N variables)
@@ -398,7 +399,7 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     
     # Create the regularized covariance matrix
     regularized_cov = np.full_like(sample_cov, mean_off_diag)
-    np.fill_diagonal(regularized_cov, diag_elements)
+    np.fill_diagonal(regularized_cov, diag_elements + 1e-6)  # Small regularization term
     
     return regularized_cov
 
