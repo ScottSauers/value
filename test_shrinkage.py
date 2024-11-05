@@ -222,6 +222,7 @@ class CovarianceEvaluator:
         true_cov: np.ndarray,
         est_returns: pd.DataFrame,
         val_returns: pd.DataFrame
+        method: str
     ) -> dict:
         """Calculate comprehensive evaluation metrics."""
         metrics = {}
@@ -276,7 +277,7 @@ class CovarianceEvaluator:
             metrics['weight_std'] = weights.std()
             
         except Exception as e:
-            self.logger.print_and_log(f"Error in portfolio calculations: {str(e)}")
+            self.logger.print_and_log(f"Error in portfolio calculations for method {method}: {str(e)}")
             metrics.update({
                 'pred_var': np.nan,
                 'real_var': np.nan,
@@ -354,7 +355,7 @@ class CovarianceEvaluator:
                     
                     # Calculate metrics
                     metrics = self.evaluate_estimation(
-                        est_cov, true_cov, train_rets, test_rets
+                        est_cov, true_cov, train_rets, test_rets, method
                     )
                     
                     metrics['window'] = len(window_info)
