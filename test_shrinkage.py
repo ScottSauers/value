@@ -374,43 +374,43 @@ class CovarianceEvaluator:
         summary = self.create_summary(results, window_info)
         
         return summary, results
-
+    
     def get_ensemble_estimate(
-       self,
-       returns: pd.DataFrame,
-       base_methods: list = ['sample', 'identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 'nonlinear'],
-       ensemble_type: str = 'smallest'
+        self,
+        returns: pd.DataFrame,
+        base_methods: list = ['sample', 'identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 'nonlinear'],
+        ensemble_type: str = 'smallest'
     ) -> np.ndarray:
-       """Get ensemble covariance estimate using element-wise combination."""
-       n = returns.shape[1]
-       estimates = []
-       
-       for method in base_methods:
-           try:
-               if method == 'sample':
-                   est = returns.cov().values
-               else:
-                   est = self.get_shrinkage_estimate(returns, method)
-               estimates.append(est)
-           except Exception as e:
-               self.logger.print_and_log(f"Error in ensemble with {method}: {str(e)}")
-               
-       if not estimates:
-           raise ValueError("No valid estimates for ensemble")
-           
-       result = np.zeros((n, n))
-       estimates_array = np.array(estimates)
-       
-       for i in range(n):
-           for j in range(i + 1):
-               values = estimates_array[:, i, j]
-               values = values[~np.isnan(values)]
-               
-               if len(values) == 0:
-                   raise ValueError(f"No valid estimates for position ({i}, {j})")
+        """Get ensemble covariance estimate using element-wise combination."""
+        n = returns.shape[1]
+        estimates = []
         
-               sorted_vals = np.sort(values)
-
+        for method in base_methods:
+            try:
+                if method == 'sample':
+                    est = returns.cov().values
+                else:
+                    est = self.get_shrinkage_estimate(returns, method)
+                estimates.append(est)
+            except Exception as e:
+                self.logger.print_and_log(f"Error in ensemble with {method}: {str(e)}")
+                
+        if not estimates:
+            raise ValueError("No valid estimates for ensemble")
+            
+        result = np.zeros((n, n))
+        estimates_array = np.array(estimates)
+        
+        for i in range(n):
+            for j in range(i + 1):
+                values = estimates_array[:, i, j]
+                values = values[~np.isnan(values)]
+                
+                if len(values) == 0:
+                    raise ValueError(f"No valid estimates for position ({i}, {j})")
+                
+                sorted_vals = np.sort(values)
+    
                 if ensemble_type == 'smallest':
                     baseline = np.median(sorted_vals)  # Get typical scale
                     min_val = 1e-8 * baseline if baseline > 0 else 1e-8
@@ -428,30 +428,30 @@ class CovarianceEvaluator:
                         val = sorted_vals[0]
                         if val < min_val:
                             val = min_val
-                            
-               elif ensemble_type == 'third_smallest':
-                   val = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[-1]
-               elif ensemble_type == 'trimmed_mean':
-                   if len(values) >= 4:
-                       q1, q3 = np.percentile(values, [25, 75])
-                       iqr = q3 - q1
-                       lower = q1 - 1.5 * iqr
-                       upper = q3 + 1.5 * iqr
-                       trimmed = values[(values >= lower) & (values <= upper)]
-                       val = np.mean(trimmed)
-                   else:
-                       val = np.mean(values)
-                       
-               result[i, j] = val
-               if i != j:
-                   result[j, i] = val
+                elif ensemble_type == 'third_smallest':
+                    val = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[-1]
+                elif ensemble_type == 'trimmed_mean':
+                    if len(values) >= 4:
+                        q1, q3 = np.percentile(values, [25, 75])
+                        iqr = q3 - q1
+                        lower = q1 - 1.5 * iqr
+                        upper = q3 + 1.5 * iqr
+                        trimmed = values[(values >= lower) & (values <= upper)]
+                        val = np.mean(trimmed)
+                    else:
+                        val = np.mean(values)
+                        
+                result[i, j] = val
+                if i != j:
+                    result[j, i] = val
     
-           eigenvals = linalg.eigvalsh(result)
-           if np.min(eigenvals) < 1e-10:
-               min_eig = np.maximum(eigenvals.min(), 1e-10)
-               result += min_eig * np.eye(n)
-               
-       return result
+        eigenvals = linalg.eigvalsh(result)
+        if np.min(eigenvals) < 1e-10:
+            min_eig = np.maximum(eigenvals.min(), 1e-10)
+            result += min_eig * np.eye(n)
+            
+        return result
+
         
         
     def get_shrinkage_estimate(
