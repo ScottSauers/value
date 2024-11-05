@@ -134,14 +134,13 @@ def linear_shrinkage_constant_correlation(returns: np.ndarray,
     phi_mat = (Y.T @ Y) / T - S ** 2
     pi = np.sum(phi_mat)
     
-    # Estimate rho
+    # Estimate rho with asymptotic covariance formula
     theta_mat = (returns ** 3).T @ returns / T
     s = np.sqrt(np.diag(S)).reshape(-1,1)
-    rho = (np.sum(np.diag(phi_mat)) + 
-           np.mean(theta_mat / (s @ s.T)) * np.sum(F - np.diag(np.diag(F))))
+    rho = np.sum(np.diag(phi_mat)) + np.mean(theta_mat) * np.sum(F - np.diag(np.diag(F)))
     
-    # Compute shrinkage intensity
-    shrinkage = max(0, min(1, (pi - rho) / d2 / T))
+    # Compute shrinkage intensity with scaling
+    shrinkage = max(0, min(1, (pi - rho) / (d2 * T)))
     
     # Compute estimator
     sigma = shrinkage * F + (1 - shrinkage) * S
@@ -210,10 +209,10 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
         market_returns = returns.mean(axis=1)
     betas = np.linalg.lstsq(np.column_stack([np.ones(T), market_returns]), returns, rcond=None)[0][1]
     var_market = np.var(market_returns, ddof=1)
-    rho = (np.sum(np.diag(phi_mat)) + 
-           var_market * np.mean(theta_mat / (betas @ betas.T)) * 
-           np.sum(F - np.diag(np.diag(F))))
-    
+
+    rho = np.sum(np.diag(phi_mat)) + \
+          var_market * np.mean(theta_mat) * np.sum(F - np.diag(np.diag(F)))
+                                   
     # Compute optimal shrinkage intensity
     shrinkage = max(0, min(1, (pi - rho) / (d2 * T)))
     
