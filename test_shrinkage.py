@@ -423,6 +423,23 @@ class CovarianceEvaluator:
                         val = np.mean(trimmed)
                     else:
                         val = np.mean(values)
+                elif ensemble_type == 'third_and_mean':
+                    # Get third smallest
+                    third = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[-1]
+                    
+                    # Get trimmed mean
+                    if len(values) >= 4:
+                        q1, q3 = np.percentile(values, [25, 75])
+                        iqr = q3 - q1
+                        lower = q1 - 1.5 * iqr
+                        upper = q3 + 1.5 * iqr
+                        trimmed = values[(values >= lower) & (values <= upper)]
+                        mean_val = np.mean(trimmed)
+                    else:
+                        mean_val = np.mean(values)
+                    
+                    # Average them
+                    val = (third + mean_val) / 2
                         
                 result[i, j] = val
                 if i != j:
@@ -462,6 +479,8 @@ class CovarianceEvaluator:
             est_cov = self.get_ensemble_estimate(returns, ensemble_type='third_smallest')
         elif method == 'ensemble_mean':
             est_cov = self.get_ensemble_estimate(returns, ensemble_type='trimmed_mean')
+        elif method == 'ensemble_third_mean':
+            est_cov = self.get_ensemble_estimate(returns, ensemble_type='third_and_mean')
         else:
             raise ValueError(f"Unknown method: {method}")
         
@@ -541,7 +560,7 @@ def main():
         methods = [
             'identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 
             'nonlinear', 'ensemble_third',
-            'ensemble_mean'
+            'ensemble_mean', 'ensemble_third_mean'
         ]    
         summary, detailed_results = evaluator.evaluate_rolling_windows(
             returns,
