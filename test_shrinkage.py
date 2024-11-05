@@ -469,7 +469,7 @@ def main():
         evaluator = CovarianceEvaluator(logger)
         
         # Run evaluation
-        methods = ['identity', 'const_corr', 'single_factor', 'nonlinear']
+        methods = ['identity', 'const_corr', 'single_factor', 'rscm', 'nonlinear']
         summary, detailed_results = evaluator.evaluate_rolling_windows(
             returns,
             train_window=300,    # 252 is 1 year training
