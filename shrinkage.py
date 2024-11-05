@@ -377,35 +377,30 @@ def rscm_shrinkage(returns: np.ndarray):
 
 def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
-    Apply dual shrinkage: ridge on diagonal elements and lasso on off-diagonal elements
-    for covariance matrix estimation.
+    Apply shrinkage to a covariance matrix by preserving the diagonal and replacing
+    all off-diagonal elements with the overall mean of off-diagonals.
     
     Args:
         returns: T x N matrix of returns (T observations, N variables)
     
     Returns:
-        Regularized covariance matrix.
+        Regularized covariance matrix with unchanged diagonal and averaged off-diagonal elements.
     """
-    ridge_alpha = 0.1  # Ridge strength
-    lasso_alpha = 0.05  # Lasso strength
-    
     # Calculate the sample covariance matrix
     sample_cov = np.cov(returns, rowvar=False, ddof=1)
-    N = sample_cov.shape[0]
     
-    # Apply ridge regularization to diagonal
-    ridge_cov = sample_cov.copy()
-    np.fill_diagonal(ridge_cov, np.diag(sample_cov) + ridge_alpha)
+    # Get the diagonal elements
+    diag_elements = np.diag(sample_cov)
     
-    # Apply lasso regularization to off-diagonal elements
-    regularized_cov = ridge_cov.copy()
-    for i in range(N):
-        for j in range(i + 1, N):  # Only upper triangular part for efficiency
-            regularized_cov[i, j] *= (1 - lasso_alpha)
-            regularized_cov[j, i] = regularized_cov[i, j]  # Symmetry
+    # Calculate the mean of off-diagonal elements
+    off_diag_mask = ~np.eye(sample_cov.shape[0], dtype=bool)
+    mean_off_diag = np.mean(sample_cov[off_diag_mask])
+    
+    # Create the regularized covariance matrix
+    regularized_cov = np.full_like(sample_cov, mean_off_diag)
+    np.fill_diagonal(regularized_cov, diag_elements)
     
     return regularized_cov
-
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
