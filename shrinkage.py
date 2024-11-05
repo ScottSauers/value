@@ -452,7 +452,19 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     # Apply global shrinkage
     global_shrinkage = 0.3
     shrinkage_target = np.diag(np.diag(sample_cov))
-    result
+    result = (1 - global_shrinkage) * result + global_shrinkage * shrinkage_target
+    
+    # Symmetry
+    result = (result + result.T) / 2
+    
+    # Positive definiteness
+    min_eigenval = np.min(np.linalg.eigvals(result).real)
+    if min_eigenval < 1e-10:
+        result += (1e-10 - min_eigenval) * np.eye(n_assets)
+        
+    return result
+
+                        
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
