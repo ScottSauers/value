@@ -17,25 +17,29 @@ from scipy import stats
 def preprocess_returns(returns: np.ndarray, 
                       demean: bool = True) -> Tuple[np.ndarray, int, int]:
     """
-    Preprocess the returns data for covariance estimation.
-    
-    Args:
-        returns: T x N matrix of returns (T observations of N assets)
-        demean: Whether to demean the returns
-        
-    Returns:
-        Processed returns, number of observations (T), number of assets (N)
+    Preprocess returns with proper centering and handling of samples.
     """
     if not isinstance(returns, np.ndarray):
         returns = np.array(returns)
         
     if returns.ndim != 2:
-        raise ValueError("Returns must be a 2-dimensional array")
+        raise ValueError("Returns must be a 2-dimensional array") 
         
     T, N = returns.shape
     
+    # Handle demeaning
     if demean:
-        returns = returns - returns.mean(axis=0)
+        # Use ddof=1 for unbiased estimation
+        means = returns.mean(axis=0)
+        returns = returns - means
+        
+    # Check for nan/inf
+    if np.any(np.isnan(returns)) or np.any(np.isinf(returns)):
+        raise ValueError("Returns contain nan/inf values")
+        
+    # Warning if T < N 
+    if T < N:
+        print(f"Warning: More variables ({N}) than observations ({T})")
         
     return returns, T, N
 
@@ -222,52 +226,65 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
     return sigma, shrinkage
 
 def nonlinear_analytical_shrinkage(returns: np.ndarray,
-                                 market_returns: Optional[np.ndarray] = None,
                                  demean: bool = True) -> np.ndarray:
+    """
+    Compute nonlinear shrinkage following Ledoit-Wolf 2020 paper.
+    """
+    # Initial setup
     returns, T, N = preprocess_returns(returns, demean)
     
-    # Sample covariance eigendecomposition
-    S = np.cov(returns, rowvar=False, ddof=1)
+    # Sample covariance with proper bias correction
+    S = np.cov(returns, rowvar=False, ddof=1)  # Important: ddof=1
+    
+    # Get eigendecomposition
     eigenvalues, eigenvectors = np.linalg.eigh(S)
+    eigenvalues = np.maximum(eigenvalues, 0)  # Ensure positivity
     
-    # Handle market returns
-    if market_returns is None:
-        # Equal weighted portfolio 
-        market_returns = returns.mean(axis=1, keepdims=True)
-    else:
-        market_returns = market_returns.reshape(-1, 1)
-        
-    # Fit market model    
-    X = np.column_stack([np.ones(T), market_returns])
-    betas = np.linalg.lstsq(X, returns, rcond=None)[0][1]
-    residuals = returns - market_returns @ betas.reshape(1,-1)
-    
-    # Concentration ratio
+    # Compute concentration ratio c = N/T
     c = N / T
     
-    # Modified kernel estimation incorporating market factor
-    var_market = np.var(market_returns, ddof=1)
+    # Define kernel parameters
+    # Silverman's rule for bandwidth
     h = 0.9 * min(np.std(eigenvalues), stats.iqr(eigenvalues)/1.34) * N**(-0.2)
-    grid = np.linspace(min(eigenvalues)-4*h, max(eigenvalues)+4*h, 512)
-    density = stats.gaussian_kde(eigenvalues, bw_method=h)(grid)
     
-    # Modified Hilbert transform estimation
+    # Set up grid for density estimation
+    grid_min = max(0, min(eigenvalues) - 4*h)
+    grid_max = max(eigenvalues) + 4*h
+    grid = np.linspace(grid_min, grid_max, min(512, N))
+    
+    # Compute density estimate with proper scaling
+    kde = stats.gaussian_kde(eigenvalues, bw_method=h)
+    density = kde(grid) 
+    
+    # Compute Hilbert transform  
     def hilbert_transform(x):
-        base = np.mean(density / (grid - x))
-        market = var_market * np.sum(betas**2) / N
-        return base + market * np.mean(1 / (grid - x))
+        # Handle edge cases
+        if x <= grid_min or x >= grid_max:
+            return 0
+        # Principal value computation
+        indices = grid != x
+        return np.mean(density[indices] / (grid[indices] - x))
         
-    # Compute optimal nonlinear shrinkage considering market influence
+    # Compute optimal nonlinear shrinkage
     d = np.zeros(N)
     for i in range(N):
         if eigenvalues[i] == 0 and c > 1:
+            # Handle zero eigenvalues case
             d[i] = 1 / (np.pi * (c-1) * hilbert_transform(0))
         else:
-            d[i] = eigenvalues[i] / (np.pi**2 * c * eigenvalues[i] * density[i]**2 + 
-                   (1-c-np.pi**2*c*eigenvalues[i]*hilbert_transform(eigenvalues[i])**2)**2)
-            
-    # Reconstruct estimator 
+            # Main formula from paper
+            ht = hilbert_transform(eigenvalues[i])
+            d[i] = eigenvalues[i] / (
+                (np.pi * c * eigenvalues[i] * density[i])**2 + 
+                (1 - c - np.pi * c * eigenvalues[i] * ht)**2
+            )
+    
+    # Reconstruct with numerical stability check
+    d = np.maximum(d, np.min(eigenvalues[eigenvalues > 0])/100)  # Floor for stability
     sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
+    
+    # Symmetry
+    sigma = (sigma + sigma.T) / 2
     
     return sigma
 
