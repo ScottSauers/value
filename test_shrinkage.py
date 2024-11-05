@@ -291,7 +291,7 @@ class CovarianceEvaluator:
         returns: pd.DataFrame,
         train_window: int = 126,  # 252 is 1 year
         test_window: int = 126,   # 252 is 1 year test
-        min_periods: int = 200,
+        min_periods: int = 100,
         methods: list = ['identity', 'const_corr', 'single_factor', 'nonlinear']
     ) -> Tuple[pd.DataFrame, Dict[str, List[dict]]]:
         """
@@ -471,7 +471,7 @@ def main():
             returns,
             train_window=126,    # 252 is 1 year training
             test_window=126,     # 252 is 1 year testing
-            min_periods=200,
+            min_periods=100,
             methods=methods
         )
         
