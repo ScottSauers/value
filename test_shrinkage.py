@@ -293,7 +293,7 @@ class CovarianceEvaluator:
         train_window: int = 300,  # 252 is 1 year
         test_window: int = 300,   # 252 is 1 year test
         min_periods: int = 100,
-        methods: list = ['identity', 'const_corr', 'single_factor', 'nonlinear']
+        methods: list = ['identity', 'const_corr', 'single_factor', 'rscm', 'nonlinear']
     ) -> Tuple[pd.DataFrame, Dict[str, List[dict]]]:
         """
         Evaluate methods using rolling windows of train/test data.
@@ -389,7 +389,7 @@ class CovarianceEvaluator:
             est_cov, _ = linear_shrinkage_constant_correlation(returns_array, demean)
         elif method == 'single_factor':
             est_cov, _ = linear_shrinkage_single_factor(returns_array, None, demean)
-        elif method == 'rscm_shrinkage':
+        elif method == 'rscm':
             est_cov, _ = rscm_shrinkage(returns_array, demean)
         elif method == 'nonlinear':
             est_cov = nonlinear_analytical_shrinkage(returns_array, demean)
