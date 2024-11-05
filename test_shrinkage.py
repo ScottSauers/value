@@ -242,11 +242,10 @@ class CovarianceEvaluator:
             metrics['pred_var'] = pred_var
             metrics['real_var'] = real_var
             metrics['var_ratio'] = real_var / pred_var
-    
-            print(f"evaluate_estimation section:")
+            print(f"\nevaluate_estimation section for {method}:")
             print(f"Frobenius norm: {metrics['frobenius']:.6f}")
-            print(f"Predicted portfolio variance: {pred_var:.6f}")
-            print(f"Realized portfolio variance: {real_var:.6f}")
+            print(f"Predicted portfolio variance: {metrics['pred_var']:.6f}")
+            print(f"Realized portfolio variance: {metrics['real_var']:.6f}") 
             print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
             print(f"Perfect prediction would be 1.000\n")
             
