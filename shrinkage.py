@@ -368,6 +368,50 @@ def rscm_shrinkage(returns: np.ndarray):
 
     return RSCM
 
+def dual_shrinkage(returns: np.ndarray, ridge_alpha: float, lasso_alpha: float) -> np.ndarray:
+    """
+    Apply dual shrinkage: ridge on diagonal elements and lasso on off-diagonal elements
+    for covariance matrix estimation.
+    
+    Args:
+        returns: T x N matrix of returns (T observations, N variables)
+        ridge_alpha: Regularization strength for ridge regression (diagonal elements)
+        lasso_alpha: Regularization strength for lasso regression (off-diagonal elements)
+    
+    Returns:
+        Regularized covariance matrix.
+    """
+    # Calculate the sample covariance matrix
+    sample_cov = np.cov(returns, rowvar=False, ddof=1)
+    N = sample_cov.shape[0]
+    
+    # Apply ridge regularization to the diagonal elements
+    ridge_cov = sample_cov.copy()
+    for i in range(N):
+        ridge_cov[i, i] += ridge_alpha
+
+    # Apply lasso regularization to off-diagonal elements
+    regularized_cov = np.zeros_like(sample_cov)
+    
+    for i in range(N):
+        y = sample_cov[i, :]
+        y[i] = 0  # Exclude diagonal element from lasso
+        X = np.delete(sample_cov, i, axis=1)  # All rows without i-th column
+        
+        # Run lasso on the off-diagonal elements to regularize covariances
+        lasso = Lasso(alpha=lasso_alpha, fit_intercept=False, max_iter=10000)
+        lasso.fit(X, y)
+        
+        # Set regularized off-diagonal entries
+        regularized_cov[i, i] = ridge_cov[i, i]  # Diagonal from ridge
+        regularized_cov[i, :i] = lasso.coef_[:i]
+        regularized_cov[i, i+1:] = lasso.coef_[i:]
+        
+    # Make the matrix symmetric
+    regularized_cov = (regularized_cov + regularized_cov.T) / 2
+
+    return regularized_cov
+
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
                         market_returns: Optional[np.ndarray] = None,
@@ -406,6 +450,9 @@ def shrinkage_estimation(returns: np.ndarray,
 
     elif method == 'rscm_shrinkage':
         return rscm_shrinkage(returns)
-    
+
+    elif method == 'dual_shrinkage'
+        return dual_shrinkage(returns, ridge_alpha=0.1, lasso_alpha=0.05)
+
     else:  # nonlinear
         return nonlinear_analytical_shrinkage(returns, demean)
