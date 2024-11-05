@@ -12,6 +12,7 @@ from shrinkage import (
     linear_shrinkage_constant_correlation,
     linear_shrinkage_single_factor, 
     rscm_shrinkage,
+    dual_shrinkage,
     nonlinear_analytical_shrinkage
 )
 import sys
