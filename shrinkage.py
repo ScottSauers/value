@@ -458,7 +458,7 @@ def shrinkage_estimation(returns: np.ndarray,
     elif method == 'rscm_shrinkage':
         return rscm_shrinkage(returns)
 
-    elif method == 'dual_shrinkage'
+    elif method == 'dual_shrinkage':
         return dual_shrinkage(returns, ridge_alpha=0.1, lasso_alpha=0.05)
 
     else:  # nonlinear
