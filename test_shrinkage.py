@@ -469,8 +469,8 @@ def main():
         methods = ['identity', 'const_corr', 'single_factor', 'nonlinear']
         summary, detailed_results = evaluator.evaluate_rolling_windows(
             returns,
-            train_window=252,    # 1 year training
-            test_window=252,     # 1 year testing
+            train_window=126,    # 252 is 1 year training
+            test_window=126,     # 252 is 1 year testing
             min_periods=200,
             methods=methods
         )
