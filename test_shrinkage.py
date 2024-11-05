@@ -427,8 +427,8 @@ class CovarianceEvaluator:
                         val = np.mean(trimmed)
                     else:
                         val = np.mean(values)
-                else:  # median
-                    val = np.median(values)
+                else:
+                    print(Invalid name)
                     
                 result[i, j] = val
                 if i != j:
@@ -471,8 +471,6 @@ class CovarianceEvaluator:
             est_cov = self.get_ensemble_estimate(returns, ensemble_type='third_smallest')
         elif method == 'ensemble_mean':
             est_cov = self.get_ensemble_estimate(returns, ensemble_type='trimmed_mean')
-        elif method == 'ensemble_median':
-            est_cov = self.get_ensemble_estimate(returns, ensemble_type='median')
         else:
             raise ValueError(f"Unknown method: {method}")
         
@@ -552,7 +550,7 @@ def main():
         methods = [
             'identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 
             'nonlinear', 'ensemble_smallest', 'ensemble_second', 'ensemble_third',
-            'ensemble_mean', 'ensemble_median'
+            'ensemble_mean'
         ]    
         summary, detailed_results = evaluator.evaluate_rolling_windows(
             returns,
