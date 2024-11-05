@@ -258,39 +258,112 @@ def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> 
     sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
     return (sigma + sigma.T) / 2
 
-def rscm_shrinkage(returns: np.ndarray, demean: bool = True) -> np.ndarray:
-    """Compute nonlinear shrinkage for stock return covariance matrices."""
-    returns, T, N = preprocess_returns(returns, demean)
-    
-    # Sample covariance 
-    S = np.cov(returns, rowvar=False, ddof=1)
-    eigenvalues, eigenvectors = np.linalg.eigh(S)
-    eigenvalues = np.maximum(eigenvalues, 0)
-    
-    c = N / T 
-    base_shrinkage = np.trace(S) / (N * T)  
-    
-    # First compute ell1 and ell2 eigenvalues and gammas
-    # Ell1
-    d1 = eigenvalues
-    d1 = np.maximum(d1, base_shrinkage*(1 + c))  
-    d1 = d1 / (1 + c)
-    gamma1 = np.trace(np.diag(d1) @ np.diag(d1)) / (np.trace(np.diag(d1))/N)**2
+def ell3_rscm(X):
+    """
+    Compute the Ell3-RSCM estimator.
 
-    # Ell2  
-    d2 = eigenvalues
-    d2 = np.maximum(d2, base_shrinkage*(1 + c))
-    d2 = d2/(1 + c)
-    gamma2 = np.trace(np.diag(d2) @ np.diag(d2)) / (np.trace(np.diag(d2))/N)**2
+    Input:
+    X: n x p data matrix (rows are observations).
 
-    # Choose ell1 or ell2 based on smaller gamma
-    if gamma1 <= gamma2:
-        d = d1
+    Output:
+    RSCM: p x p regularized covariance matrix estimate.
+    """
+
+    n, p = X.shape
+
+    if n < 4:
+        raise ValueError("Sample size n must be at least 4.")
+
+    # Center the data
+    X_centered = X - np.mean(X, axis=0)
+
+    # Compute sample covariance matrix S
+    S = np.cov(X_centered, rowvar=False, bias=False)  # Unbiased estimator
+
+    # Compute eta and eta2
+    eta = np.trace(S) / p
+    eta2 = np.trace(S @ S) / p
+
+    # Estimate elliptical kurtosis parameter kappa_hat
+    ka_lb = -2 / (p + 2)  # Lower bound for kappa
+    vari = np.mean(X_centered ** 2, axis=0)
+    idx_nonzero_var = vari > 0
+    if np.sum(idx_nonzero_var) == 0:
+        raise ValueError("All variables have zero variance.")
+    X_kurt = X_centered[:, idx_nonzero_var]
+    vari = vari[idx_nonzero_var]
+    if n <= 3:
+        raise ValueError("Sample size n must be greater than 3 for kurtosis estimation.")
+    kurt1n = (n - 1) / ((n - 2) * (n - 3))
+    g2 = np.mean(X_kurt ** 4, axis=0) / (vari ** 2) - 3
+    G2 = kurt1n * ((n + 1) * g2 + 6)
+    kurtest = np.mean(G2)
+    kappahat = (1 / 3) * kurtest
+    if kappahat > 1e6:
+        raise ValueError("Too large value for kurtosis.")
+    if kappahat <= ka_lb + abs(ka_lb) / 40:
+        kappahat = ka_lb + abs(ka_lb) / 40
+
+    # Compute gamma_hat1 (Ell1 estimate)
+    d = np.sqrt(np.sum(X_centered ** 2, axis=1))
+    nonzero_d = d > 1e-8
+    if np.sum(nonzero_d) < 2:
+        raise ValueError("Not enough non-zero observations for Ell1 estimation.")
+    X_nonzero = X_centered[nonzero_d, :]
+    d_nonzero = d[nonzero_d]
+    n_nonzero = X_nonzero.shape[0]
+    X_normed = X_nonzero / d_nonzero[:, None]
+    Csgn = (1 / n_nonzero) * X_normed.T @ X_normed
+    trace_Csgn_sq = np.trace(Csgn @ Csgn)
+    gammahat0 = (p * n_nonzero / (n_nonzero - 1)) * (trace_Csgn_sq - 1 / n_nonzero)
+    m2 = np.mean(1 / (d_nonzero ** 2))
+    m1 = np.mean(1 / d_nonzero)
+    ratio = m2 / (m1 ** 2)
+    delta = (1 / n_nonzero ** 2) * (2 - 2 * ratio + ratio ** 2)
+    gammahat1 = gammahat0 - p * delta
+    gammahat1 = min(p, max(1, gammahat1))
+
+    # Compute gamma_hat2 (Ell2 estimate)
+    gammahat0 = eta2 / (eta ** 2)
+    a = (n / (n + kappahat)) * (n / (n - 1) + kappahat)
+    numerator = (kappahat + n) * (n - 1) ** 2
+    denominator = (n - 2) * (3 * kappahat * (n - 1) + n * (n + 1))
+    if denominator == 0:
+        raise ValueError("Denominator in computation of 'b' is zero.")
+    b = numerator / denominator
+    gammahat2 = b * (gammahat0 - a * (p / n))
+    gammahat2 = min(p, max(1, gammahat2))
+
+    # Compute beta_o for each estimate
+    numerator1 = gammahat1 - 1
+    denominator1 = numerator1 + kappahat * (2 * gammahat1 + p) / n + (gammahat1 + p) / (n - 1)
+    if denominator1 == 0:
+        raise ValueError("Denominator in computation of beta_o1 is zero.")
+    beta_o1 = numerator1 / denominator1
+    beta_o1 = np.clip(beta_o1, 0, 1)
+
+    numerator2 = gammahat2 - 1
+    denominator2 = numerator2 + kappahat * (2 * gammahat2 + p) / n + (gammahat2 + p) / (n - 1)
+    if denominator2 == 0:
+        raise ValueError("Denominator in computation of beta_o2 is zero.")
+    beta_o2 = numerator2 / denominator2
+    beta_o2 = np.clip(beta_o2, 0, 1)
+
+    # Compute alpha_o
+    alpha_o1 = (1 - beta_o1) * eta
+    alpha_o2 = (1 - beta_o2) * eta
+
+    # Compute RSCM estimators
+    RSCM1 = beta_o1 * S + alpha_o1 * np.eye(p)
+    RSCM2 = beta_o2 * S + alpha_o2 * np.eye(p)
+
+    # Choose the estimator with smaller gamma_hat
+    if gammahat1 <= gammahat2:
+        RSCM = RSCM1
     else:
-        d = d2
+        RSCM = RSCM2
 
-    sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
-    return (sigma + sigma.T) / 2
+    return RSCM
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
