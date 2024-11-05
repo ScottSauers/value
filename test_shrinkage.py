@@ -289,8 +289,8 @@ class CovarianceEvaluator:
     def evaluate_rolling_windows(
         self,
         returns: pd.DataFrame,
-        train_window: int = 126,  # 252 is 1 year
-        test_window: int = 126,   # 252 is 1 year test
+        train_window: int = 300,  # 252 is 1 year
+        test_window: int = 300,   # 252 is 1 year test
         min_periods: int = 100,
         methods: list = ['identity', 'const_corr', 'single_factor', 'nonlinear']
     ) -> Tuple[pd.DataFrame, Dict[str, List[dict]]]:
@@ -469,8 +469,8 @@ def main():
         methods = ['identity', 'const_corr', 'single_factor', 'nonlinear']
         summary, detailed_results = evaluator.evaluate_rolling_windows(
             returns,
-            train_window=126,    # 252 is 1 year training
-            test_window=126,     # 252 is 1 year testing
+            train_window=300,    # 252 is 1 year training
+            test_window=300,     # 252 is 1 year testing
             min_periods=100,
             methods=methods
         )
