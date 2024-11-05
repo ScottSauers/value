@@ -258,6 +258,40 @@ def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> 
     sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
     return (sigma + sigma.T) / 2
 
+def rscm_shrinkage(returns: np.ndarray, demean: bool = True) -> np.ndarray:
+    """Compute nonlinear shrinkage for stock return covariance matrices."""
+    returns, T, N = preprocess_returns(returns, demean)
+    
+    # Sample covariance 
+    S = np.cov(returns, rowvar=False, ddof=1)
+    eigenvalues, eigenvectors = np.linalg.eigh(S)
+    eigenvalues = np.maximum(eigenvalues, 0)
+    
+    c = N / T 
+    base_shrinkage = np.trace(S) / (N * T)  
+    
+    # First compute ell1 and ell2 eigenvalues and gammas
+    # Ell1
+    d1 = eigenvalues
+    d1 = np.maximum(d1, base_shrinkage*(1 + c))  
+    d1 = d1 / (1 + c)
+    gamma1 = np.trace(np.diag(d1) @ np.diag(d1)) / (np.trace(np.diag(d1))/N)**2
+
+    # Ell2  
+    d2 = eigenvalues
+    d2 = np.maximum(d2, base_shrinkage*(1 + c))
+    d2 = d2/(1 + c)
+    gamma2 = np.trace(np.diag(d2) @ np.diag(d2)) / (np.trace(np.diag(d2))/N)**2
+
+    # Choose ell1 or ell2 based on smaller gamma
+    if gamma1 <= gamma2:
+        d = d1
+    else:
+        d = d2
+
+    sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
+    return (sigma + sigma.T) / 2
+
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
                         market_returns: Optional[np.ndarray] = None,
@@ -293,6 +327,9 @@ def shrinkage_estimation(returns: np.ndarray,
     
     elif method == 'single_factor':
         return linear_shrinkage_single_factor(returns, market_returns, demean)
+
+    elif method == 'rscm_shrinkage':
+        return rscm_shrinkage(returns, demean)
     
     else:  # nonlinear
         return nonlinear_analytical_shrinkage(returns, demean)
