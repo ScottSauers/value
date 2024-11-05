@@ -411,24 +411,7 @@ class CovarianceEvaluator:
                 
                 sorted_vals = np.sort(values)
     
-                if ensemble_type == 'smallest':
-                    baseline = np.median(sorted_vals)  # Get typical scale
-                    min_val = 1e-8 * baseline if baseline > 0 else 1e-8
-                    val = sorted_vals[0]
-                    if val < min_val:
-                        val = min_val
-                elif ensemble_type == 'second_smallest':
-                    baseline = np.median(sorted_vals)
-                    min_val = 1e-8 * baseline if baseline > 0 else 1e-8
-                    if len(sorted_vals) > 1:
-                        val = sorted_vals[1]
-                        if val < min_val:
-                            val = min_val
-                    else:
-                        val = sorted_vals[0]
-                        if val < min_val:
-                            val = min_val
-                elif ensemble_type == 'third_smallest':
+                if ensemble_type == 'third_smallest':
                     val = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[-1]
                 elif ensemble_type == 'trimmed_mean':
                     if len(values) >= 4:
@@ -475,10 +458,6 @@ class CovarianceEvaluator:
             est_cov = dual_shrinkage(returns)
         elif method == 'nonlinear':
             est_cov = nonlinear_analytical_shrinkage(returns_array, demean)
-        elif method == 'ensemble_smallest':
-            est_cov = self.get_ensemble_estimate(returns, ensemble_type='smallest')
-        elif method == 'ensemble_second':
-            est_cov = self.get_ensemble_estimate(returns, ensemble_type='second_smallest')
         elif method == 'ensemble_third':
             est_cov = self.get_ensemble_estimate(returns, ensemble_type='third_smallest')
         elif method == 'ensemble_mean':
@@ -561,7 +540,7 @@ def main():
         # Run evaluation
         methods = [
             'identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 
-            'nonlinear', 'ensemble_smallest', 'ensemble_second', 'ensemble_third',
+            'nonlinear', 'ensemble_third',
             'ensemble_mean'
         ]    
         summary, detailed_results = evaluator.evaluate_rolling_windows(
