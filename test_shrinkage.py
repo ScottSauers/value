@@ -393,7 +393,7 @@ class CovarianceEvaluator:
         elif method == 'rscm':
             est_cov = rscm_shrinkage(returns_array)
         elif method == 'dual_shrinkage':
-            est_cov = dual_shrinkage(returns, ridge_alpha=0.1, lasso_alpha=0.05)
+            est_cov = dual_shrinkage(returns)
         elif method == 'nonlinear':
             est_cov = nonlinear_analytical_shrinkage(returns_array, demean)
         else:
