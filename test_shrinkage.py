@@ -410,18 +410,25 @@ class CovarianceEvaluator:
                    raise ValueError(f"No valid estimates for position ({i}, {j})")
         
                sorted_vals = np.sort(values)
-               
-               if ensemble_type == 'smallest':
-                   val = sorted_vals[0]
-                   if np.abs(val) < 1e-10:  # If too close to zero, use next value
-                       val = sorted_vals[1] if len(sorted_vals) > 1 else sorted_vals[0]
-               elif ensemble_type == 'second_smallest':
-                   if len(sorted_vals) > 1:
-                       val = sorted_vals[1]
-                       if np.abs(val) < 1e-10:  # If too close to zero, use next value
-                           val = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[1]
-                   else:
-                       val = sorted_vals[0]
+
+                if ensemble_type == 'smallest':
+                    baseline = np.median(sorted_vals)  # Get typical scale
+                    min_val = 1e-8 * baseline if baseline > 0 else 1e-8
+                    val = sorted_vals[0]
+                    if val < min_val:
+                        val = min_val
+                elif ensemble_type == 'second_smallest':
+                    baseline = np.median(sorted_vals)
+                    min_val = 1e-8 * baseline if baseline > 0 else 1e-8
+                    if len(sorted_vals) > 1:
+                        val = sorted_vals[1]
+                        if val < min_val:
+                            val = min_val
+                    else:
+                        val = sorted_vals[0]
+                        if val < min_val:
+                            val = min_val
+                            
                elif ensemble_type == 'third_smallest':
                    val = sorted_vals[2] if len(sorted_vals) > 2 else sorted_vals[-1]
                elif ensemble_type == 'trimmed_mean':
