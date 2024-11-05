@@ -232,7 +232,7 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
     return sigma, shrinkage
 
 def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> np.ndarray:
-    """Compute nonlinear shrinkage."""
+    """Compute nonlinear shrinkage for stock return covariance matrices."""
     returns, T, N = preprocess_returns(returns, demean)
     
     S = np.cov(returns, rowvar=False, ddof=1)
@@ -240,38 +240,21 @@ def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> 
     eigenvalues = np.maximum(eigenvalues, 0)
     
     c = N / T
-    # More aggressive regularization floor based on matrix trace
-    base_shrinkage = np.trace(S) / (N * T) 
-    eigenvalues = np.maximum(eigenvalues, base_shrinkage)
+    base_shrinkage = np.trace(S) / (N * T)
+    min_var = base_shrinkage * (1 + c)  # Minimum variance scaled by concentration
 
-    # Adaptive bandwidth proportional to eigenvalue magnitudes
-    hn = T**(-1/3)  # Global bandwidth
-    hn_i = eigenvalues * hn  # Local bandwidths
-    
-    # Compute density estimate with proportional bandwidths
-    density = np.zeros(N)
-    for i in range(N):
-        weights = np.maximum(0, 1 - ((eigenvalues[i] - eigenvalues)/(5*hn_i))**2)
-        density[i] = np.sum(weights/(hn_i)) / (N * 4/3)
-
-    # Compute Hilbert transform with regularization
-    hilbert = np.zeros(N)
-    for i in range(N):
-        diff = eigenvalues[i] - eigenvalues
-        diff[abs(diff) < 1e-10] = 1e-10  # Prevent division by zero
-        kernel_vals = np.maximum(0, 1 - (diff/(5*hn_i))**2)
-        hilbert_kernel = -diff/(np.pi * diff**2) * kernel_vals
-        hilbert[i] = np.sum(hilbert_kernel)/(N * 4/3)
-    
-    # Compute optimal nonlinear shrinkage
+    # Separate treatment for diagonal vs off-diagonal
     d = np.zeros(N)
     for i in range(N):
-        numer = eigenvalues[i]
-        denom = (np.pi * c * eigenvalues[i] * density[i])**2 + (1 - c - np.pi * c * eigenvalues[i] * hilbert[i])**2
-        # Aggressive floor using both base_shrinkage and minimum eigenvalue
-        d[i] = numer / max(denom, base_shrinkage * (1 + c))
-        d[i] = max(d[i], base_shrinkage)
+        # For diagonal elements, use direct variance estimate with floor
+        var_est = max(eigenvalues[i], min_var)
         
+        # Adjust for estimation error based on concentration
+        d[i] = var_est / (1 + c)
+    
+        # Additional safeguard against very small values
+        d[i] = max(d[i], min_var)
+
     sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
     return (sigma + sigma.T) / 2
 
