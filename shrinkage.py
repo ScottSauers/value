@@ -377,35 +377,78 @@ def rscm_shrinkage(returns: np.ndarray):
 
 def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
-    Apply shrinkage to a covariance matrix by preserving the diagonal and replacing
-    all off-diagonal elements with the overall mean of off-diagonals, with an added
-    regularization term to the diagonal based on overall variance.
+    Estimate covariance matrix using HDBSCAN for structure detection and eigenvalue cleaning.
+    
+    Args:
+        returns: numpy array of shape (time_steps, n_assets) containing returns
+        
+    Returns:
+        Estimated covariance matrix of shape (n_assets, n_assets)
     """
-    # Preprocess returns
-    returns, T, N = preprocess_returns(returns, demean=True)
+    # Initial sample covariance and correlation
+    sample_cov = np.cov(returns.T)
+    std_devs = np.sqrt(np.diag(sample_cov))
+    sample_corr = sample_cov / np.outer(std_devs, std_devs)
     
-    # Check if T > N to avoid singularity
-    if T < N:
-        print(f"Warning: More variables ({N}) than observations ({T}). Covariance matrix may be singular.")
+    # Run HDBSCAN on correlation patterns
+    clusterer = HDBSCAN(min_cluster_size=3, min_samples=2)
+    clusterer.fit(sample_corr)
     
-    # Calculate the sample covariance matrix
-    sample_cov = np.cov(returns, rowvar=False, ddof=1)
+    # Identify noise points (-1 in labels)
+    n_assets = returns.shape[1]
+    is_noise = (clusterer.labels_ == -1)
+    non_noise = ~is_noise
     
-    # Get the diagonal elements
-    diag_elements = np.diag(sample_cov)
+    # Initialize result matrix
+    result = np.zeros((n_assets, n_assets))
     
-    # Calculate the mean of off-diagonal elements
-    off_diag_mask = ~np.eye(sample_cov.shape[0], dtype=bool)
-    mean_off_diag = np.mean(sample_cov[off_diag_mask])
+    # Handle non-noise assets
+    if np.any(non_noise):
+        non_noise_idx = np.where(non_noise)[0]
+        non_noise_cov = sample_cov[non_noise_idx][:, non_noise_idx]
+        
+        # Eigenvalue cleaning for non-noise part
+        eigenvals, eigenvecs = np.linalg.eigh(non_noise_cov)
+        
+        # Keep top eigenvalues explaining 80% of variance
+        total_var = np.sum(eigenvals)
+        cum_var_ratio = np.cumsum(eigenvals[::-1])[::-1] / total_var
+        k = np.sum(cum_var_ratio > 0.2)  # keep eigenvalues explaining 80%
+        
+        # Clean eigenvalues
+        cleaned_eigenvals = eigenvals.copy()
+        cleaned_eigenvals[:-k] = np.mean(eigenvals[:-k])  # shrink bottom eigenvalues
+        
+        # Reconstruct non-noise covariance
+        cleaned_cov = eigenvecs @ np.diag(cleaned_eigenvals) @ eigenvecs.T
+        result[non_noise_idx[:, None], non_noise_idx] = cleaned_cov
     
-    # Scale regularization by the mean variance
-    variance_scale = np.mean(diag_elements) * 1e-2
+    # Handle noise assets
+    if np.any(is_noise):
+        noise_idx = np.where(is_noise)[0]
+        
+        # For noise assets, keep only variance (diagonal)
+        # and apply strong shrinkage to market factor
+        market_return = np.mean(returns, axis=1)
+        for idx in noise_idx:
+            # Keep variance
+            result[idx, idx] = sample_cov[idx, idx]
+            
+            # Minimal market exposure (strongly shrunk)
+            if np.any(non_noise):
+                beta = 0.1 * np.cov(returns[:, idx], market_return)[0,1] / np.var(market_return)
+                result[idx, non_noise_idx] = beta * sample_cov[idx, non_noise_idx]
+                result[non_noise_idx, idx] = beta * sample_cov[non_noise_idx, idx]
     
-    # Create the regularized covariance matrix
-    regularized_cov = np.full_like(sample_cov, mean_off_diag)
-    np.fill_diagonal(regularized_cov, diag_elements + variance_scale)
+    # Symmetry
+    result = (result + result.T) / 2
     
-    return regularized_cov
+    # Positive definiteness by adding small diagonal if needed
+    min_eigenval = np.min(np.linalg.eigvals(result).real)
+    if min_eigenval < 1e-10:
+        result += (1e-10 - min_eigenval) * np.eye(n_assets)
+    
+    return result
 
 
 def shrinkage_estimation(returns: np.ndarray,
