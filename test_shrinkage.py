@@ -362,7 +362,9 @@ class CovarianceEvaluator:
                     metrics['method'] = method
                     results[method].append(metrics)
                     if 'var_ratio' in metrics:
-                        print(f"\n{method.upper()} METHOD:")
+                        print(f"\n{method.upper()} METHOD - Window {len(window_info)}:")
+                        print(f"Train: {train_start.strftime('%Y-%m-%d')} to {train_end.strftime('%Y-%m-%d')}")
+                        print(f"Test:  {train_end.strftime('%Y-%m-%d')} to {test_end.strftime('%Y-%m-%d')}")
                         print(f"Predicted portfolio variance: {metrics['pred_var']:.6f}")
                         print(f"Realized portfolio variance:  {metrics['real_var']:.6f}")
                         print(f"Variance ratio:              {metrics['var_ratio']:.3f}")
