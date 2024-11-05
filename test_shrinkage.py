@@ -224,22 +224,39 @@ class CovarianceEvaluator:
         val_returns: pd.DataFrame,
         method: str
     ) -> dict:
-        """Calculate direct covariance matrix comparison metrics."""
+        """Calculate comprehensive evaluation metrics."""
         metrics = {}
         
         # Matrix distance metrics
         metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
         
-        # Direct variance ratio - element by element comparison
-        var_ratios = true_cov / est_cov
-        metrics['var_ratio'] = np.mean(var_ratios)  # average ratio across matrix
-        
-        # Maybe add other metrics here
-        
-        print(f"evaluate_estimation section:")
-        print(f"Frobenius norm: {metrics['frobenius']:.6f}")
-        print(f"Average variance ratio: {metrics['var_ratio']:.3f}")
-        print(f"Perfect prediction would be 1.000\n")
+        try:
+            # Construct equal weight portfolio (much simpler than minimum variance)
+            n = len(est_cov)
+            weights = np.ones(n) / n  # just equal weights, no optimization needed
+            
+            # Calculate predicted vs realized risk
+            pred_var = weights @ est_cov @ weights
+            real_var = weights @ true_cov @ weights
+            
+            metrics['pred_var'] = pred_var
+            metrics['real_var'] = real_var
+            metrics['var_ratio'] = real_var / pred_var
+    
+            print(f"evaluate_estimation section:")
+            print(f"Frobenius norm: {metrics['frobenius']:.6f}")
+            print(f"Predicted portfolio variance: {pred_var:.6f}")
+            print(f"Realized portfolio variance: {real_var:.6f}")
+            print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
+            print(f"Perfect prediction would be 1.000\n")
+            
+        except Exception as e:
+            self.logger.print_and_log(f"Error in variance calculations for method {method}: {str(e)}")
+            metrics.update({
+                'pred_var': np.nan,
+                'real_var': np.nan,
+                'var_ratio': np.nan
+            })
         
         return metrics
 
