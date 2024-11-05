@@ -379,7 +379,7 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
     Apply shrinkage to a covariance matrix by preserving the diagonal and replacing
     all off-diagonal elements with the overall mean of off-diagonals, with an added
-    small regularization term to the diagonal for numerical stability.
+    regularization term to the diagonal based on overall variance.
     
     Args:
         returns: T x N matrix of returns (T observations, N variables)
@@ -397,11 +397,15 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     off_diag_mask = ~np.eye(sample_cov.shape[0], dtype=bool)
     mean_off_diag = np.mean(sample_cov[off_diag_mask])
     
+    # Scale regularization by the mean variance
+    variance_scale = np.mean(diag_elements) * 1e-3  # Scaled regularization term
+
     # Create the regularized covariance matrix
     regularized_cov = np.full_like(sample_cov, mean_off_diag)
-    np.fill_diagonal(regularized_cov, diag_elements + 1e-6)  # Small regularization term
+    np.fill_diagonal(regularized_cov, diag_elements + variance_scale)
     
     return regularized_cov
+
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
