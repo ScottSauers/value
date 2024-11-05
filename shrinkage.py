@@ -375,6 +375,9 @@ def rscm_shrinkage(returns: np.ndarray):
 
     return RSCM
 
+import numpy as np
+from hdbscan import HDBSCAN
+
 def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     """
     Estimate covariance matrix using HDBSCAN for structure detection and eigenvalue cleaning.
@@ -393,8 +396,8 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     std_devs = np.sqrt(np.diag(sample_cov))
     sample_corr = sample_cov / np.outer(std_devs, std_devs)
     
-    # Run HDBSCAN on correlation patterns
-    clusterer = HDBSCAN(min_cluster_size=3, min_samples=2)
+    # Run HDBSCAN with more conservative parameters
+    clusterer = HDBSCAN(min_cluster_size=5, min_samples=3, cluster_selection_epsilon=0.3)
     clusterer.fit(sample_corr)
     
     # Identify noise points (-1 in labels)
@@ -408,19 +411,23 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     # Handle non-noise assets
     if len(non_noise_idx) > 0:
         non_noise_cov = sample_cov[non_noise_idx][:, non_noise_idx]
-        
+  
         # Eigenvalue cleaning for non-noise part
         eigenvals, eigenvecs = np.linalg.eigh(non_noise_cov)
-        
-        # Keep top eigenvalues explaining 80% of variance
+    
+        # Eigenvalue cleaning
         total_var = np.sum(eigenvals)
         cum_var_ratio = np.cumsum(eigenvals[::-1])[::-1] / total_var
-        k = np.sum(cum_var_ratio > 0.2)
+        k = np.sum(cum_var_ratio > 0.5)
         
-        # Clean eigenvalues
+        # Clean eigenvalues with stronger shrinkage
         cleaned_eigenvals = eigenvals.copy()
-        cleaned_eigenvals[:-k] = np.mean(eigenvals[:-k])
-        
+        cleaned_eigenvals[:-k] = 0.5 * np.mean(eigenvals[:-k])
+
+        # Apply additional shrinkage to all eigenvalues
+        shrinkage_factor = 0.5
+        cleaned_eigenvals = shrinkage_factor * cleaned_eigenvals + (1 - shrinkage_factor) * np.mean(eigenvals)
+  
         # Reconstruct non-noise covariance
         cleaned_cov = eigenvecs @ np.diag(cleaned_eigenvals) @ eigenvecs.T
         result[non_noise_idx[:, None], non_noise_idx] = cleaned_cov
@@ -428,15 +435,16 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     # Handle noise assets
     if len(noise_idx) > 0:
         market_returns = np.mean(returns, axis=1)
+        market_vol = np.std(market_returns)
         
         for idx in noise_idx:
-            # Keep variance
-            result[idx, idx] = sample_cov[idx, idx]
+            # Keep variance but shrink it
+            result[idx, idx] = 0.8 * sample_cov[idx, idx]
             
-            # Calculate and shrink market exposure
+            # Calculate and shrink market exposure more aggressively
             asset_returns = returns[:, idx]
             beta = np.cov(asset_returns, market_returns)[0,1] / np.var(market_returns)
-            shrunk_beta = 0.1 * beta
+            shrunk_beta = 0.05 * beta
             
             if len(non_noise_idx) > 0:
                 for non_noise_i in non_noise_idx:
@@ -444,15 +452,10 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
                     result[idx, non_noise_i] = cov_value
                     result[non_noise_i, idx] = cov_value
     
-    # Symmetry
-    result = (result + result.T) / 2
-    
-    # Positive definiteness
-    min_eigenval = np.min(np.linalg.eigvals(result).real)
-    if min_eigenval < 1e-10:
-        result += (1e-10 - min_eigenval) * np.eye(n_assets)
-    
-    return result
+    # Apply global shrinkage
+    global_shrinkage = 0.3
+    shrinkage_target = np.diag(np.diag(sample_cov))
+    result
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
