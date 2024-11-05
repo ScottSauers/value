@@ -231,63 +231,35 @@ def linear_shrinkage_single_factor(returns: np.ndarray,
     
     return sigma, shrinkage
 
-def nonlinear_analytical_shrinkage(returns: np.ndarray,
-                                 demean: bool = True) -> np.ndarray:
-    """Compute nonlinear shrinkage."""
-    returns, T, N = preprocess_returns(returns, demean)
-    
-    # Sample covariance
-    S = np.cov(returns, rowvar=False, ddof=1)
-    
-    # Eigendecomposition 
-    eigenvalues, eigenvectors = np.linalg.eigh(S)
-    eigenvalues = np.maximum(eigenvalues, 0)
-    
-    # N > T case
-    c = N / T
-    if c > 1:
-        # Follow Section 3.3 of paper for singular case
-        pos_eigs = eigenvalues[eigenvalues > 0]
-        if len(pos_eigs) == 0:  # All zeros case
-            return np.eye(N)
-        
-        # Compute density and Hilbert transform only for positive eigenvalues
-        h = 0.9 * min(np.std(pos_eigs), stats.iqr(pos_eigs)/1.34) * len(pos_eigs)**(-0.2)
-        grid = np.linspace(max(0, min(pos_eigs) - 4*h), max(pos_eigs) + 4*h, 512)
-        density = stats.gaussian_kde(pos_eigs, bw_method=h)(grid)
-        
-        def hilbert_transform(x):
-            if x == 0:
-                return np.mean(density / grid)
-            return np.mean(density / (grid - x))
-        
-        # Zero eigenvalues get minimal value
-        d = np.zeros(N)
-        min_eig = min(pos_eigs) / 100
-        d[eigenvalues > 0] = [
-            x / ((np.pi * c * x * density[i])**2 + 
-                 (1 - c - np.pi * c * x * hilbert_transform(x))**2)
-            for i, x in enumerate(pos_eigs)
-        ]
-        d[eigenvalues == 0] = min_eig
-    else:
-        # Regular case
-        h = 0.9 * min(np.std(eigenvalues), stats.iqr(eigenvalues)/1.34) * N**(-0.2)
-        grid = np.linspace(max(0, min(eigenvalues) - 4*h), max(eigenvalues) + 4*h, 512) 
-        density = stats.gaussian_kde(eigenvalues, bw_method=h)(grid)
-        
-        def hilbert_transform(x):
-            return np.mean(density / (grid - x))
-            
-        d = np.array([
-            x / ((np.pi * c * x * density[i])**2 + 
-                 (1 - c - np.pi * c * x * hilbert_transform(x))**2)
-            for i, x in enumerate(eigenvalues)
-        ])
-    
-    # Reconstruct
-    sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
-    return (sigma + sigma.T) / 2
+def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> np.ndarray:
+   """Compute nonlinear shrinkage."""
+   returns, T, N = preprocess_returns(returns, demean)
+   
+   S = np.cov(returns, rowvar=False, ddof=1)
+   eigenvalues, eigenvectors = np.linalg.eigh(S)
+   eigenvalues = np.maximum(eigenvalues, 0)
+   
+   c = N / T
+   h = 0.9 * min(np.std(eigenvalues), stats.iqr(eigenvalues)/1.34) * N**(-0.2)
+   grid = np.linspace(max(0.0001, min(eigenvalues) + h), max(eigenvalues) + 4*h, 512)
+   density = stats.gaussian_kde(eigenvalues + h, bw_method=h)(grid)
+   
+   def hilbert_transform(x):
+       return np.mean(density / (grid - max(x, 0.0001)))
+       
+   d = np.zeros(N) 
+   base_shrinkage = np.trace(S) / (N * T)
+   
+   for i, x in enumerate(eigenvalues):
+       if x < base_shrinkage:
+           d[i] = base_shrinkage
+       else:
+           numer = x
+           denom = (np.pi * c * x * density[i])**2 + (1 - c - np.pi * c * x * hilbert_transform(x))**2
+           d[i] = numer / max(denom, base_shrinkage)
+           
+   sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
+   return (sigma + sigma.T) / 2
 
 def shrinkage_estimation(returns: np.ndarray,
                         method: str = 'nonlinear',
