@@ -231,12 +231,17 @@ def nonlinear_analytical_shrinkage(returns: np.ndarray,
     S = np.cov(returns, rowvar=False, ddof=1)
     eigenvalues, eigenvectors = np.linalg.eigh(S)
     
-    # Account for market factor influence 
+    # Handle market returns
     if market_returns is None:
-        market_returns = returns.mean(axis=1)
-    X = np.column_stack([np.ones(T), market_returns]) 
+        # Equal weighted portfolio 
+        market_returns = returns.mean(axis=1, keepdims=True)
+    else:
+        market_returns = market_returns.reshape(-1, 1)
+        
+    # Fit market model    
+    X = np.column_stack([np.ones(T), market_returns])
     betas = np.linalg.lstsq(X, returns, rcond=None)[0][1]
-    residuals = returns - market_returns.reshape(-1,1) @ betas.reshape(1,-1)
+    residuals = returns - market_returns @ betas.reshape(1,-1)
     
     # Concentration ratio
     c = N / T
