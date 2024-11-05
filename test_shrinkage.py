@@ -358,6 +358,12 @@ class CovarianceEvaluator:
                     metrics['window'] = len(window_info)
                     metrics['method'] = method
                     results[method].append(metrics)
+                    if 'var_ratio' in metrics:
+                        print(f"\n{method.upper()} METHOD:")
+                        print(f"Predicted portfolio variance: {metrics['pred_var']:.6f}")
+                        print(f"Realized portfolio variance:  {metrics['real_var']:.6f}")
+                        print(f"Variance ratio:              {metrics['var_ratio']:.3f}")
+                        print(f"(Perfect prediction would be 1.000)")
                     
                 except Exception as e:
                     self.logger.print_and_log(f"Error evaluating {method}: {str(e)}")
@@ -471,6 +477,16 @@ def main():
         
         # Print and save results
         logger.print_and_log("\nEvaluation Summary:", summary)
+
+        print("\n" + "="*80)
+        print("VARIANCE RATIO SUMMARY BY METHOD")
+        print("="*80)
+        for idx in summary.index:
+            print(f"{idx:15} - Mean: {summary.loc[idx,'var_ratio_mean']:6.3f}  Std: {summary.loc[idx,'var_ratio_std']:6.3f}")
+        print("\nMethod with ratio closest to 1.000 is best")
+        print("Low std.dev. indicates consistency across time periods")
+        print("="*80)
+        logger.print_and_log("\nFull Summary Statistics:", summary)
         
         # Save detailed results
         results_file = base_dir / 'covariance_evaluation.csv'
