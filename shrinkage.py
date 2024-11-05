@@ -5,6 +5,7 @@ This module implements various shrinkage methods for estimating large-dimensiona
 covariance matrices.
 
 References:
+- Ollila, E., & Raninen, E. (2018). Optimal shrinkage covariance matrix estimation under random sampling from elliptical distributions.
 - Ledoit, O., & Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices.
 - Ledoit, O., & Wolf, M. (2020). Analytical nonlinear shrinkage of large-dimensional covariance matrices.
 """
@@ -259,6 +260,12 @@ def nonlinear_analytical_shrinkage(returns: np.ndarray, demean: bool = True) -> 
     sigma = eigenvectors @ np.diag(d) @ eigenvectors.T
     return (sigma + sigma.T) / 2
 
+
+
+"""
+- Ollila, E., & Raninen, E. (2018). Optimal shrinkage covariance matrix estimation under random sampling from elliptical distributions.
+https://arxiv.org/abs/1808.10188
+"""
 def rscm_shrinkage(returns: np.ndarray):
     """
     Compute the Ell3-RSCM estimator.
