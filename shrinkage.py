@@ -385,6 +385,9 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     Returns:
         Estimated covariance matrix of shape (n_assets, n_assets)
     """
+    # Convert to numpy array if needed
+    returns = np.asarray(returns)
+    
     # Initial sample covariance and correlation
     sample_cov = np.cov(returns.T)
     std_devs = np.sqrt(np.diag(sample_cov))
@@ -424,15 +427,15 @@ def dual_shrinkage(returns: np.ndarray) -> np.ndarray:
     
     # Handle noise assets
     if len(noise_idx) > 0:
-        market_returns = np.mean(returns, axis=1, keepdims=True)
+        market_returns = np.mean(returns, axis=1)
         
         for idx in noise_idx:
             # Keep variance
             result[idx, idx] = sample_cov[idx, idx]
             
             # Calculate and shrink market exposure
-            asset_returns = returns[:, idx].reshape(-1, 1)
-            beta = np.cov(asset_returns.T, market_returns.T)[0,1] / np.var(market_returns)
+            asset_returns = returns[:, idx]
+            beta = np.cov(asset_returns, market_returns)[0,1] / np.var(market_returns)
             shrunk_beta = 0.1 * beta
             
             if len(non_noise_idx) > 0:
