@@ -145,7 +145,7 @@ Must have ALL of:
 - `CashAndCashEquivalentsAtCarryingValue`
 - Liabilities or complete liability construction (see Liabilities section)
 - Revenues or `RevenueFromContractWithCustomerExcludingAssessedTax`
-- At least one of: `AccountsReceivableNetCurrent`, `PropertyPlantAndEquipmentNet`, or `InterestExpenseGrossProfitInventoryNet`
+- At least one of: `AccountsReceivableNetCurrent`, `PropertyPlantAndEquipmentNet`, or `InventoryNet`
 
 **Periods Required**
 
@@ -154,7 +154,7 @@ Must have ALL of:
 - `CashAndCashEquivalentsAtCarryingValue`
 - `AvailableForSaleSecurities`
 - `AccountsReceivableNetCurrent`
-- `InterestExpenseGrossProfitInventoryNet`
+- `InventoryNet`
 - `PropertyPlantAndEquipmentNet`
 - `OperatingLeaseRightOfUseAsset` (if available)
 - `IntangibleAssetsNetExcludingGoodwill`
@@ -185,10 +185,10 @@ Must have ALL of:
      ```
 
 3. **Inventory**  
-   - Most Recent Quarter Amount: `InterestExpenseGrossProfitInventoryNet`
+   - Most Recent Quarter Amount: `InventoryNet`
    - Discount Rate β calculation:
      ```math
-     \beta = \frac{1}{1 + \frac{\text{InterestExpenseGrossProfitInventoryNet}}{\text{Cost}_{\text{TTM}}}}
+     \beta = \frac{1}{1 + \frac{\text{InventoryNet}}{\text{Cost}_{\text{TTM}}}}
      ```
 
 4. **Property, Plant & Equipment**  
@@ -256,7 +256,7 @@ where:
 \text{Cash Components} = \text{CashAndCashEquivalentsAtCarryingValue} + \text{AvailableForSaleSecurities}
 ```
 ```math
-\text{Operating Assets} = (\text{AccountsReceivableNetCurrent} \times \alpha) + (\text{InterestExpenseGrossProfitInventoryNet} \times \beta) + (\text{PropertyPlantAndEquipmentNet} + \text{OperatingLeaseRightOfUseAsset}) \times \gamma + \text{IntangibleAssetsNetExcludingGoodwill}
+\text{Operating Assets} = (\text{AccountsReceivableNetCurrent} \times \alpha) + (\text{InventoryNet} \times \beta) + (\text{PropertyPlantAndEquipmentNet} + \text{OperatingLeaseRightOfUseAsset}) \times \gamma + \text{IntangibleAssetsNetExcludingGoodwill}
 ```
 
 **Data Quality Requirements**  
