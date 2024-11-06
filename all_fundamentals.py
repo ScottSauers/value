@@ -23,7 +23,7 @@ import psutil
 import threading
 
 class CacheManager:
-    MIN_CONCEPT_THRESHOLD = 65  # Minimum concepts required for a ticker to be considered fully processed
+    MIN_CONCEPT_THRESHOLD = 100  # Minimum concepts required for a ticker to be considered fully processed
     
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
