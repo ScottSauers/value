@@ -294,26 +294,36 @@ class CovarianceEvaluator:
     def evaluate_rolling_windows(
         self,
         returns: pd.DataFrame,
-        lookback_days: int = 378,
-        test_window: int = 63,
+        lookback_days: int = 378,  # 1.5 years
+        test_window: int = 63,     # 3 months
         min_periods: int = 252,    # Minimum required periods
         methods: list = ['identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 'nonlinear']
     ) -> Tuple[pd.DataFrame, Dict[str, List[dict]]]:
-        """
-        Evaluate methods using rolling windows with fixed lookback.
-        """
-        self.logger.print_and_log("Starting rolling window evaluation")
+        """Evaluate methods using rolling windows with fixed lookback."""
         
         results = {method: [] for method in methods + ['sample']}
         window_info = []
         
-        # Rolling windows with fixed lookback
-        for t in range(lookback_days, len(returns) - test_window + 1, test_window):
-            # Fixed lookback window regardless of test period
-            train_start = returns.index[t - lookback_days]
-            train_end = returns.index[t - 1]  # Day before test starts
-            test_end = returns.index[min(t + test_window - 1, len(returns) - 1)]
+        # Get all dates
+        dates = returns.index.sort_values()
+        end_date = dates[-1]
+        
+        # Roll forward test windows from start to end
+        test_end = dates[-1]
+        while test_end > dates[0]:
+            test_start = test_end - pd.Timedelta(days=test_window)
+            train_end = test_start
+            train_start = train_end - pd.Timedelta(days=lookback_days)
             
+            # Get data for this window
+            train_rets = returns.loc[train_start:train_end]
+            test_rets = returns.loc[test_start:test_end]
+            
+            if len(train_rets) < min_periods:
+                test_end = test_start
+                continue
+                
+            # Store window info
             window_info.append({
                 'train_start': train_start,
                 'train_end': train_end,
