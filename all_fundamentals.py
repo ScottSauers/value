@@ -378,7 +378,7 @@ def setup_environment():
 def setup_logging(output_dir: Path) -> logging.Logger:
     """Set up rich logging configuration."""
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(message)s",
         handlers=[
             RichHandler(rich_tracebacks=True),
