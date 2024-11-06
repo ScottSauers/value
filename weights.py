@@ -25,6 +25,19 @@ class PortfolioOptimizer:
     """Fast portfolio optimizer for long-only constrained portfolios"""
     
     def __init__(self, returns: pd.DataFrame, cov_matrix: Optional[np.ndarray] = None):
+        """
+        Initialize optimizer with returns data and covariance matrix.
+        
+        Args:
+            returns: DataFrame of asset returns (columns are assets)
+            cov_matrix: Pre-computed covariance matrix
+        """
+        # Convert returns to DataFrame if needed
+        if isinstance(returns, pd.Series):
+            returns = returns.to_frame().T
+        elif not isinstance(returns, pd.DataFrame):
+            returns = pd.DataFrame(returns)
+        
         self._validate_inputs(returns)
         
         self.returns = returns
@@ -34,10 +47,31 @@ class PortfolioOptimizer:
         # Pre-compute annualized returns
         self.annual_returns = returns.mean() * 252
         
-        # Use provided covariance matrix
-        self.cov_matrix = cov_matrix
-        self.L = np.linalg.cholesky(cov_matrix)
-        self.use_cholesky = True
+
+        # numpy array
+        self.cov_matrix = np.asarray(cov_matrix)
+        
+        # Check dimensions
+        if self.cov_matrix.shape != (self.n_assets, self.n_assets):
+            raise ValueError("Covariance matrix dimensions don't match returns")
+            
+        # Symmetry
+        self.cov_matrix = (self.cov_matrix + self.cov_matrix.T) / 2
+        
+        # Check positive definiteness and fix if needed
+        try:
+            self.L = np.linalg.cholesky(self.cov_matrix)
+            self.use_cholesky = True
+        except np.linalg.LinAlgError:
+            # If not positive definite, use eigendecomposition with cleaning
+            eigenvals, self.eigenvecs = np.linalg.eigh(self.cov_matrix)
+            self.eigenvals = np.maximum(eigenvals, 1e-8)  # Force positive eigenvalues
+            self.use_cholesky = False
+            
+            # Reconstruct cleaned covariance matrix
+            self.cov_matrix = self.eigenvecs @ np.diag(self.eigenvals) @ self.eigenvecs.T
+            
+            warnings.warn("Covariance matrix was not positive definite. Eigenvalues were clipped for positive definiteness.")
 
     @staticmethod
     def _validate_inputs(returns: pd.DataFrame) -> None:
@@ -249,17 +283,20 @@ class PortfolioOptimizer:
         return "\n".join(lines)
 
 def optimize_portfolio(returns: pd.DataFrame,
-                      cov_matrix: np.ndarray,  
+                      cov_matrix: np.ndarray,
                       target_return: float = 0.20,
                       position_limit: float = 0.20,
                       risk_free_rate: float = 0.02) -> tuple:
     """Wrapper function for backward compatibility"""
-    # Convert returns to DataFrame if it's a Series
+    # Convert returns to DataFrame if needed
     if isinstance(returns, pd.Series):
         returns = returns.to_frame().T
     elif not isinstance(returns, pd.DataFrame):
         returns = pd.DataFrame(returns)
-        
+    
+    # Convert covariance matrix to numpy array
+    cov_matrix = np.asarray(cov_matrix)
+    
     optimizer = PortfolioOptimizer(returns, cov_matrix=cov_matrix)
     return optimizer.optimize(target_return, position_limit)
 
@@ -267,11 +304,20 @@ def print_portfolio_weights(weights: np.ndarray,
                           asset_names: list,
                           stats: dict):
     """Wrapper function for backward compatibility"""
-    # Convert asset_names to DataFrame structure
+    # Convert asset_names to proper format
     if isinstance(asset_names, pd.Series):
         df = pd.DataFrame(columns=asset_names.values)
     else:
         df = pd.DataFrame(columns=asset_names)
-        
+    
+    # Convert stats dict to PortfolioStats
+    portfolio_stats = PortfolioStats(
+        annual_return=stats.get('return', 0.0),
+        annual_volatility=stats.get('volatility', 0.0),
+        sharpe_ratio=stats.get('sharpe', 0.0),
+        max_position=np.max(weights),
+        active_positions=np.sum(weights > 1e-4)
+    )
+    
     optimizer = PortfolioOptimizer(df)
-    print(optimizer.generate_report(weights, PortfolioStats(**stats)))
+    print(optimizer.generate_report(weights, portfolio_stats))
