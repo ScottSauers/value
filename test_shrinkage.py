@@ -370,50 +370,82 @@ class CovarianceEvaluator:
         
         # Create visualizations
         self.create_performance_charts(window_df, output_dir)
-    
+        
     def create_performance_charts(self, window_df: pd.DataFrame, output_dir: Path):
         """Create and save performance visualization charts."""
         import matplotlib.pyplot as plt
-        import seaborn as sns
-        plt.style.use('seaborn')
+        import matplotlib.dates as mdates
         
-        metrics = {
-            'realized_return': 'Test Period Returns',
-            'realized_sharpe': 'Test Period Sharpe Ratio',
-            'var_ratio': 'Variance Ratio (Realized/Predicted)'
-        }
+        plt.style.use('default')
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(20, 16))
         
-        for metric, title in metrics.items():
-            plt.figure(figsize=(15, 8))
+        window_df['test_end'] = pd.to_datetime(window_df['test_end'])
+        
+        for method in window_df['method'].unique():
+            method_data = window_df[window_df['method'] == method]
             
-            # Create line plot for each method
-            for method in window_df['method'].unique():
-                method_data = window_df[window_df['method'] == method]
-                plt.plot(
-                    method_data['test_end'],
-                    method_data[metric],
-                    label=method,
-                    marker='o',
-                    markersize=4,
-                    alpha=0.7
-                )
+            # Returns
+            ax1.plot(method_data['test_end'], method_data['realized_return'], 
+                    label=method, marker='o', markersize=4, alpha=0.7)
             
-            plt.title(f'{title} Over Time by Method')
-            plt.xlabel('Test Period End Date')
-            plt.ylabel(title)
-            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
+            # Portfolio Value
+            returns = method_data['realized_return'].values
+            cumulative_returns = (1 + returns).cumprod()
+            ax2.plot(method_data['test_end'], cumulative_returns, 
+                    label=method, marker='o', markersize=4, alpha=0.7)
             
-            # Save plot
-            plt.savefig(
-                output_dir / f'{metric}_over_time.png',
-                bbox_inches='tight',
-                dpi=300
-            )
-            plt.close()
+            # Variance Ratio
+            ax3.plot(method_data['test_end'], method_data['var_ratio'], 
+                    label=method, marker='o', markersize=4, alpha=0.7)
             
-            self.logger.print_and_log(f"Saved {title} chart to: {output_dir / f'{metric}_over_time.png'}")
+            # Frobenius
+            ax4.plot(method_data['test_end'], method_data['frobenius'], 
+                    label=method, marker='o', markersize=4, alpha=0.7)
+        
+        # Configure subplots
+        ax1.set_title('Test Period Returns Over Time')
+        ax2.set_title('Cumulative Portfolio Value')
+        ax3.set_title('Variance Ratio Over Time')
+        ax4.set_title('Frobenius Norm Over Time')
+        
+        ax3.axhline(y=1.0, color='k', linestyle='--', alpha=0.5)
+        
+        for ax in [ax1, ax2, ax3, ax4]:
+            ax.grid(True, alpha=0.3)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        
+        handles, labels = ax1.get_legend_handles_labels()
+        fig.legend(handles, labels, loc='center right', bbox_to_anchor=(0.98, 0.5))
+        
+        plt.tight_layout()
+        plt.savefig(output_dir / 'performance_metrics.png', bbox_inches='tight', dpi=300)
+        plt.close()
+        
+        # Summary statistics
+        summary_stats = []
+        for method in window_df['method'].unique():
+            method_data = window_df[window_df['method'] == method]
+            stats = {
+                'method': method,
+                'var_ratio_mean': method_data['var_ratio'].mean(),
+                'var_ratio_std': method_data['var_ratio'].std(),
+                'frobenius_mean': method_data['frobenius'].mean(),
+                'frobenius_std': method_data['frobenius'].std(),
+                'return_mean': method_data['realized_return'].mean(),
+                'return_std': method_data['realized_return'].std()
+            }
+            summary_stats.append(stats)
+            
+        print("\n" + "="*80)
+        print("COMPREHENSIVE SUMMARY BY METHOD")
+        print("="*80)
+        print(f"{'Method':20} {'Var Ratio':>10} {'Var Std':>10} {'Frob Mean':>10} {'Frob Std':>10} {'Ret Mean':>10} {'Ret Std':>10}")
+        print("-"*80)
+        for stats in summary_stats:
+            print(f"{stats['method']:20} {stats['var_ratio_mean']:10.3f} {stats['var_ratio_std']:10.3f} "
+                  f"{stats['frobenius_mean']:10.3f} {stats['frobenius_std']:10.3f} "
+                  f"{stats['return_mean']:10.3f} {stats['return_std']:10.3f}")
+        print("="*80)
     
     
     def evaluate_rolling_windows(
