@@ -296,13 +296,22 @@ class SECDataExtractor:
                     break
 
         try:
-            response = finagg.sec.api.company_concept.get(
-                tag,
-                ticker=ticker,
-                taxonomy=taxonomy,
-                units=units
-            )
-            return response
+            self.logger.error(f"Attempting API call for {ticker} {tag}")  # Debug the actual call
+            try:
+                response = finagg.sec.api.company_concept.get(
+                    tag,
+                    ticker=ticker,
+                    taxonomy=taxonomy,
+                    units=units
+                )
+                if response is None or response.empty:
+                    self.logger.error(f"Empty response for {ticker} {tag}")
+                else:
+                    self.logger.error(f"Got response for {ticker} {tag}: {response.shape}")
+                return response
+            except Exception as inner_e:
+                self.logger.error(f"API call failed for {ticker} {tag}: {str(inner_e)}", exc_info=True)
+                raise
         except Exception as e:
             error_str = str(e)
             if "404" in error_str:
@@ -551,7 +560,9 @@ def main():
     
     for ticker in tickers:
         try:
+            extractor.logger.error(f"Starting to process ticker {ticker}")
             data_file, metadata_file = extractor.process_ticker(ticker)
+            extractor.logger.error(f"Finished processing ticker {ticker}: {data_file}, {metadata_file}")
             print(f"Successfully processed {ticker}")
             print(f"Data file: {data_file}")
             print(f"Metadata file: {metadata_file}")
