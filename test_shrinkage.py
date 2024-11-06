@@ -290,7 +290,7 @@ class CovarianceEvaluator:
             real_var = weights @ true_cov @ weights
             
             # Calculate realized returns on test set
-            test_returns = (weights * val_returns).sum(axis=1)  # Portfolio returns in test period
+            test_returns = val_returns @ weights  # Portfolio returns in test period
             realized_annual_return = test_returns.mean() * 252  # Annualize
             realized_annual_vol = test_returns.std() * np.sqrt(252)
             realized_sharpe = realized_annual_return / realized_annual_vol
