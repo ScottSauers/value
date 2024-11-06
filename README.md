@@ -13,8 +13,10 @@ The fundamental value of a business consists of two components:
 Investors pay a premium for liquidity. Therefore, illiquid stocks may have higher value. Also, small market cap stocks may not be worth it for larger players, so there may be more inefficiencies left unexploited. As the market recognizes the true value of the company, the stock trend towards fair value.
 
 ## Usage
-
-Run all_fundamentals.py to get fundamentals.
+- Install dependencies.
+- Create an .env file with your API keys.
+- Run screen.py to get small cap stocks.
+- Run all_fundamentals.py to get fundamentals.
 
 ## Asset Value Calculation
 
