@@ -541,9 +541,9 @@ def main():
         ]    
         summary, detailed_results = evaluator.evaluate_rolling_windows(
             returns,
-            train_window=300,    # 252 is 1 year training
-            test_window=300,     # 252 is 1 year testing
-            min_periods=100,
+            lookback_days=378,    # 252 is 1 year training
+            test_window=63,     # 252 is 1 year testing
+            min_periods=252,
             methods=methods
         )
         
