@@ -103,12 +103,12 @@ Where:
 #### Value Ratio Calculation
 
 ```math
-\text{Value Ratio} = \frac{\text{Total Value}}{\text{Market Cap}} = \frac{NAV + \text{Present Value of FCF}}{\text{Market Cap}}
+\text{Value Ratio} = \frac{\text{Total Value}}{\text{Market Cap}} = \frac{NAV + \text{Present Value of FCF} + \text{Present Value of Contracted Revenue}}{\text{Market Cap}}
 ```
 
 Where:
 ```math
-NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + (PP\&E \times \gamma) - Total\space Liabilities
+NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + ((PP\&E + Operating\space Lease\space Assets) \times \gamma) - Total\space Liabilities
 ```
 
 ```math
@@ -119,7 +119,7 @@ NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + (PP\&E \
 
 **Core Formula**  
 ```math
-\text{Value Ratio} = \frac{\text{Net Asset Value} + \text{Present Value of Future Cash Flows}}{\text{Market Cap}}
+\text{Value Ratio} = \frac{\text{Net Asset Value} + \text{Present Value of Future Cash Flows} + \text{Present Value of Contracted Revenue}}{\text{Market Cap}}
 ```
 
 **Required Data Components**
@@ -141,7 +141,11 @@ Must have ALL of:
 - `AccountsReceivableNetCurrent`
 - `InterestExpenseGrossProfitInventoryNet`
 - `PropertyPlantAndEquipmentNet`
+- `OperatingLeaseRightOfUseAsset`
 - `IntangibleAssetsNetExcludingGoodwill`
+- `CapitalExpendituresIncurredButNotYetPaid`
+- `RevenueRemainingPerformanceObligation`
+- `ContractWithCustomerLiabilityCurrent`
 - All liability components
 - All asset components
 
@@ -150,6 +154,7 @@ Must have ALL of:
 - `CostOfGoodsAndServicesSold` or `CostOfRevenue`
 - `NetCashProvidedByUsedInOperatingActivities`
 - `PaymentsToAcquirePropertyPlantAndEquipment`
+- `PaymentsToAcquireBusinessesNetOfCashAcquired`
 - `OperatingIncomeLoss`
 - `DepreciationDepletionAndAmortization`
 
@@ -173,11 +178,11 @@ Must have ALL of:
      \beta = \frac{1}{1 + \frac{\text{InterestExpenseGrossProfitInventoryNet}}{\text{Cost}_{\text{TTM}}}}
      ```
 
-4. **Property, Plant & Equipment**  
-   - Most Recent Quarter Amount: `PropertyPlantAndEquipmentNet`
+4. **Property, Plant & Equipment and Operating Lease Assets**  
+   - Most Recent Quarter Amount: `PropertyPlantAndEquipmentNet` + `OperatingLeaseRightOfUseAsset` (if available)
    - Discount Rate γ calculation:
      ```math
-     \gamma = \frac{1}{1 + \frac{\text{PropertyPlantAndEquipmentNet}}{\text{Revenue}_{\text{TTM}}}}
+     \gamma = \frac{1}{1 + \frac{\text{PropertyPlantAndEquipmentNet} + \text{OperatingLeaseRightOfUseAsset}}{\text{Revenue}_{\text{TTM}}}}
      ```
 
 5. **Liabilities**  
@@ -187,6 +192,7 @@ Must have ALL of:
      - `LongTermDebtNoncurrent`
      - `OperatingLeaseLiabilityNoncurrent`
      - `DeferredTaxLiabilitiesNoncurrent`
+     - `ContractWithCustomerLiabilityCurrent`
 
 6. **Operating Asset Value**  
    - Most Recent Quarter: `IntangibleAssetsNetExcludingGoodwill` (if available)
@@ -195,8 +201,8 @@ Must have ALL of:
 **Free Cash Flow (FCF) Calculation**
 
 **Primary Method (TTM Basis)**  
-- Operating Cash Flow: Sum last four quarters of `NetCashProvidedByUsedInOperatingActivities`  
-- Capital Expenditure: Sum last four quarters of `PaymentsToAcquirePropertyPlantAndEquipment`
+- Operating Cash Flow: Sum last four quarters of `NetCashProvidedByUsedInOperatingActivities`
+- Capital Expenditure: Sum last four quarters of (`PaymentsToAcquirePropertyPlantAndEquipment` + `CapitalExpendituresIncurredButNotYetPaid` - `PaymentsToAcquireBusinessesNetOfCashAcquired`)
 ```math
 \text{FCF} = \text{Operating Cash Flow} - \text{Capital Expenditure}
 ```
@@ -219,15 +225,20 @@ For any flow measure:
 **Present Value Calculation**  
 If current TTM FCF is positive:
 ```math
-\text{Present Value} = \frac{\text{FCF}_{\text{TTM}}}{0.10}
+\text{Present Value of FCF} = \frac{\text{FCF}_{\text{TTM}}}{0.10}
 ```
 If current TTM FCF is negative:
 - Examine each of previous four TTM periods
 - Use most recent positive FCF if available
 - If no positive FCF in lookback period:
   ```math
-  \text{Present Value} = 0
+  \text{Present Value of FCF} = 0
   ```
+
+If `RevenueRemainingPerformanceObligation` available:
+```math
+\text{Present Value of Contracted Revenue} = \frac{\text{RevenueRemainingPerformanceObligation}}{0.10}
+```
 
 **Net Asset Value Assembly**  
 ```math
@@ -238,7 +249,7 @@ where:
 \text{Cash Components} = \text{CashAndCashEquivalentsAtCarryingValue} + \text{AvailableForSaleSecurities}
 ```
 ```math
-\text{Operating Assets} = (\text{AccountsReceivableNetCurrent} \times \alpha) + (\text{InterestExpenseGrossProfitInventoryNet} \times \beta) + (\text{PropertyPlantAndEquipmentNet} \times \gamma) + \text{IntangibleAssetsNetExcludingGoodwill}
+\text{Operating Assets} = (\text{AccountsReceivableNetCurrent} \times \alpha) + (\text{InterestExpenseGrossProfitInventoryNet} \times \beta) + (\text{PropertyPlantAndEquipmentNet} + \text{OperatingLeaseRightOfUseAsset}) \times \gamma + \text{IntangibleAssetsNetExcludingGoodwill}
 ```
 
 **Data Quality Requirements**  
@@ -256,6 +267,8 @@ Flag if:
 - Significant period-over-period variance (>50%) in operating metrics
 - Negative stockholder equity (`StockholdersEquity`)
 - Operating cash flow and FCF have opposite signs
+- Operating lease assets present without corresponding liabilities or vice versa
+- Contracted revenue obligations exceed historical revenue run rate by >100%
 
 ## Portfolio Construction
 
