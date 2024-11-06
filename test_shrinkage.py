@@ -143,12 +143,6 @@ class DataProcessor:
         
         stats['removed_missing'] = len(price_cols) - len(valid_cols)
         
-        # Select stocks above market cap threshold
-        avg_prices = df_prices.mean()
-        cutoff = np.percentile(avg_prices, min_market_cap_pct * 100)
-        large_caps = avg_prices[avg_prices >= cutoff].index
-        df_prices = df_prices[large_caps]
-        
         stats['final_stocks'] = len(df_prices.columns)
         
         # Forward fill then backward fill remaining missing values
