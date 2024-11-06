@@ -272,6 +272,14 @@ class MarketCapScreener:
             return cached_data
             
         try:
+            # Check if SEC_API_USER_AGENT is set
+            sec_user_agent = os.getenv('SEC_API_USER_AGENT')
+            if not sec_user_agent:
+                print("Warning: SEC_API_USER_AGENT not found in environment. Using default value.")
+                sec_user_agent = "Sample Company Name sample@email.com"
+                os.environ['SEC_API_USER_AGENT'] = sec_user_agent
+            
+            print(f"Using SEC API user agent: {sec_user_agent}")
             print("Fetching exchange data using finagg SEC API...")
             df = finagg.sec.api.exchanges.get()
             print(f"Exchange data fetched. Total entries: {len(df)}")
