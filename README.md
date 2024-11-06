@@ -100,42 +100,6 @@ Where:
 
 ## Implementation
 
-### SEC Filing Data Collection
-
-#### Some XBRL Tags (possible)
-```
-us-gaap:CashAndCashEquivalentsAtCarryingValue
-us-gaap:AccountsReceivableNetCurrent
-us-gaap:InventoryNet
-us-gaap:PropertyPlantAndEquipmentNet
-us-gaap:AccountsPayableCurrent
-us-gaap:LongTermDebtNoncurrent
-us-gaap:Revenues
-us-gaap:CostOfRevenue
-us-gaap:OperatingExpenses
-us-gaap:CapitalExpendituresIncurredButNotYetPaid
-us-gaap:PaymentsToAcquirePropertyPlantAndEquipment
-us-gaap:OperatingLeaseLiabilityCurrent
-us-gaap:ContractWithCustomerLiabilityCurrent
-us-gaap:AccruedLiabilitiesCurrent
-us-gaap:OperatingLeaseLiabilityNoncurrent
-us-gaap:DeferredTaxLiabilitiesNoncurrent
-us-gaap:PensionAndOtherPostretirementBenefitPlans
-us-gaap:WeightedAverageNumberOfSharesOutstandingBasic
-us-gaap:CommonStockParOrStatedValuePerShare
-us-gaap:CommitmentsAndContingencies
-us-gaap:GuaranteeObligations
-us-gaap:GrossProfit
-us-gaap:NetIncomeLoss
-us-gaap:EarningsPerShareBasic
-us-gaap:EarningsPerShareDiluted
-us-gaap:InterestExpense
-us-gaap:IncomeTaxExpenseBenefit
-us-gaap:TotalLiabilities
-us-gaap:TotalAssets
-us-gaap:DepreciationAmortizationAndAccretion
-```
-
 #### Value Ratio Calculation
 
 ```math
