@@ -59,6 +59,8 @@ All three parameters must:
 - Use only universally reported financial data
 - Generate dimensionless ratios between 0 and 1
 
+These might mix point-in-time with averages.
+
 ### Liabilities
 1. Current Liabilities
    - Accounts payable
