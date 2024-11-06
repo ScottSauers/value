@@ -286,7 +286,7 @@ Let $w$ be our vector of portfolio weights (what we're solving for). We need two
 
 where $R_{it}$ is the realized return of asset $i$ at time $t$, $T$ is the number of historical observations, and $\bar{R}_i$ is the mean historical return of asset $i$.
 
-Then, we can apply [Ollila-Raninen shrinkage](https://arxiv.org/pdf/1808.10188) (Ell3-RSCM) to the covariance matrix.
+Then, we can apply [Ollila-Raninen shrinkage](https://arxiv.org/pdf/1808.10188) (Ell3-RSCM) to the covariance matrix. View the proper code for it here: http://users.spa.aalto.fi/esollila/regscm/.
 
 To generate the efficient frontier, we solve:
 
