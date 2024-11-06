@@ -217,47 +217,63 @@ class CovarianceEvaluator:
         return np.sqrt(np.sum(diff * diff))
     
     def evaluate_estimation(
-        self,
-        est_cov: np.ndarray,
-        true_cov: np.ndarray,
-        est_returns: pd.DataFrame,
-        val_returns: pd.DataFrame,
-        method: str
-    ) -> dict:
-        """Calculate comprehensive evaluation metrics."""
-        metrics = {}
-        
-        # Matrix distance metrics
-        metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
-        
-        try:
-            # Construct equal weight portfolio (much simpler than minimum variance)
-            n = len(est_cov)
-            weights = np.ones(n) / n  # just equal weights, no optimization needed
+            self,
+            est_cov: np.ndarray,
+            true_cov: np.ndarray,
+            est_returns: pd.DataFrame,
+            val_returns: pd.DataFrame,
+            method: str
+        ) -> dict:
+            """Calculate evaluation metrics with optimized portfolio."""
+            metrics = {}
             
-            # Calculate predicted vs realized risk
-            pred_var = weights @ est_cov @ weights
-            real_var = weights @ true_cov @ weights
+            # Matrix distance metrics
+            metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
             
-            metrics['pred_var'] = pred_var
-            metrics['real_var'] = real_var
-            metrics['var_ratio'] = real_var / pred_var
-            print(f"\nevaluate_estimation section for {method}:")
-            print(f"Frobenius norm: {metrics['frobenius']:.6f}")
-            print(f"Predicted portfolio variance: {metrics['pred_var']:.6f}")
-            print(f"Realized portfolio variance: {metrics['real_var']:.6f}") 
-            print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
-            print(f"Perfect prediction would be 1.000\n")
+            try:
+                # Get optimized portfolio weights
+                weights, stats = optimize_portfolio(
+                    est_returns,
+                    est_cov,
+                    target_return=0.20,  # 20% annual return target
+                    position_limit=0.20   # 20% maximum position size
+                )
+                
+                # Calculate predicted vs realized risk
+                pred_var = weights @ est_cov @ weights
+                real_var = weights @ true_cov @ weights
+                
+                metrics['pred_var'] = pred_var
+                metrics['real_var'] = real_var
+                metrics['var_ratio'] = real_var / pred_var
+                metrics['portfolio_weights'] = weights
+                metrics['portfolio_stats'] = stats
+                
+                # Print detailed results
+                print(f"\nEvaluation results for {method}:")
+                print(f"Frobenius norm: {metrics['frobenius']:.6f}")
+                print(f"Predicted portfolio variance: {metrics['pred_var']:.6f}")
+                print(f"Realized portfolio variance: {metrics['real_var']:.6f}")
+                print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
+                
+                # Print portfolio weights
+                print_portfolio_weights(
+                    weights,
+                    est_returns.columns,
+                    stats
+                )
+                
+            except Exception as e:
+                self.logger.print_and_log(f"Error in variance calculations for method {method}: {str(e)}")
+                metrics.update({
+                    'pred_var': np.nan,
+                    'real_var': np.nan,
+                    'var_ratio': np.nan,
+                    'portfolio_weights': None,
+                    'portfolio_stats': None
+                })
             
-        except Exception as e:
-            self.logger.print_and_log(f"Error in variance calculations for method {method}: {str(e)}")
-            metrics.update({
-                'pred_var': np.nan,
-                'real_var': np.nan,
-                'var_ratio': np.nan
-            })
-        
-        return metrics
+            return metrics
 
     
     def evaluate_rolling_windows(
