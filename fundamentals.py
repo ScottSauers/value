@@ -359,6 +359,11 @@ class SECDataExtractor:
                 self.logger.warning(f"No SEC data found for {ticker}. Last error: {last_error}")
             else:
                 self.logger.warning(f"No SEC data found for {ticker}")
+                    if not all_dates:
+                        print(f"Reason: No filing dates found for ticker {ticker}. This may indicate that there are no recent filings or cached data is missing.")
+                    if not valid_concepts:
+                        missing_concepts = [concept.tag for concept in self.SEC_CONCEPTS if concept not in valid_concepts]
+                        print(f"Reason: No valid concepts found for ticker {ticker}. Missing concepts: {missing_concepts}")
             print(f"No SEC data found for ticker {ticker}.")
             return pd.DataFrame()
         
