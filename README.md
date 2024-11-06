@@ -197,10 +197,12 @@ Must have ALL of:
      ```math
      \gamma = \frac{1}{1 + \frac{\text{PropertyPlantAndEquipmentNet} + \text{OperatingLeaseRightOfUseAsset}}{\text{Revenue}_{\text{TTM}}}}
      ```
+  - Alternative (if primary missing):
+      - `PropertyPlantAndEquipmentNet` = `PropertyPlantAndEquipmentGross` - `AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment`
 
 5. **Liabilities**  
    - Most Recent Quarter: Primary Method: `Liabilities`
-   - Alternative Construction (sum of):
+   - Alternative Construction (sum of) (if primary missing):
      - `LiabilitiesCurrent`
      - `LongTermDebtNoncurrent`
      - `OperatingLeaseLiabilityNoncurrent`
