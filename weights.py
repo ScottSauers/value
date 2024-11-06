@@ -249,11 +249,17 @@ class PortfolioOptimizer:
         return "\n".join(lines)
 
 def optimize_portfolio(returns: pd.DataFrame,
-                      cov_matrix: np.ndarray,
+                      cov_matrix: np.ndarray,  
                       target_return: float = 0.20,
                       position_limit: float = 0.20,
                       risk_free_rate: float = 0.02) -> tuple:
     """Wrapper function for backward compatibility"""
+    # Convert returns to DataFrame if it's a Series
+    if isinstance(returns, pd.Series):
+        returns = returns.to_frame().T
+    elif not isinstance(returns, pd.DataFrame):
+        returns = pd.DataFrame(returns)
+        
     optimizer = PortfolioOptimizer(returns, cov_matrix=cov_matrix)
     return optimizer.optimize(target_return, position_limit)
 
@@ -261,5 +267,11 @@ def print_portfolio_weights(weights: np.ndarray,
                           asset_names: list,
                           stats: dict):
     """Wrapper function for backward compatibility"""
-    optimizer = PortfolioOptimizer(pd.DataFrame(columns=asset_names))
+    # Convert asset_names to DataFrame structure
+    if isinstance(asset_names, pd.Series):
+        df = pd.DataFrame(columns=asset_names.values)
+    else:
+        df = pd.DataFrame(columns=asset_names)
+        
+    optimizer = PortfolioOptimizer(df)
     print(optimizer.generate_report(weights, PortfolioStats(**stats)))
