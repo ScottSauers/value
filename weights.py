@@ -24,34 +24,20 @@ class PortfolioStats:
 class PortfolioOptimizer:
     """Fast portfolio optimizer for long-only constrained portfolios"""
     
-    def __init__(self, returns: pd.DataFrame):
-        """
-        Initialize optimizer with historical returns data.
-        
-        Args:
-            returns: DataFrame of asset returns (columns are assets)
-        """
+    def __init__(self, returns: pd.DataFrame, cov_matrix: Optional[np.ndarray] = None):
         self._validate_inputs(returns)
         
         self.returns = returns
         self.n_assets = returns.shape[1]
         self.asset_names = returns.columns.tolist()
         
-        # Pre-compute annualized statistics (252 trading days)
+        # Pre-compute annualized returns
         self.annual_returns = returns.mean() * 252
-        self.cov_matrix = returns.cov() * 252
         
-        # Cache matrix decomposition for efficient optimization
-        try:
-            # Try Cholesky first (faster and more stable if matrix is well-conditioned)
-            self.L = np.linalg.cholesky(self.cov_matrix)
-            self.use_cholesky = True
-        except LinAlgError:
-            # Fall back to eigendecomposition if matrix is poorly conditioned
-            warnings.warn("Covariance matrix poorly conditioned, using eigendecomposition")
-            eigenvals, self.eigenvecs = np.linalg.eigh(self.cov_matrix)
-            self.eigenvals = np.maximum(eigenvals, 0)  # Non-negative
-            self.use_cholesky = False
+        # Use provided covariance matrix
+        self.cov_matrix = cov_matrix
+        self.L = np.linalg.cholesky(cov_matrix)
+        self.use_cholesky = True
 
     @staticmethod
     def _validate_inputs(returns: pd.DataFrame) -> None:
@@ -268,7 +254,7 @@ def optimize_portfolio(returns: pd.DataFrame,
                       position_limit: float = 0.20,
                       risk_free_rate: float = 0.02) -> tuple:
     """Wrapper function for backward compatibility"""
-    optimizer = PortfolioOptimizer(returns)
+    optimizer = PortfolioOptimizer(returns, cov_matrix=cov_matrix)
     return optimizer.optimize(target_return, position_limit)
 
 def print_portfolio_weights(weights: np.ndarray, 
