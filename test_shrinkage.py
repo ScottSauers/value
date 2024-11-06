@@ -95,7 +95,6 @@ class DataProcessor:
     def load_price_data(
         file_path: str,
         start_date: str,
-        min_market_cap_pct: float = 0.5,  # Minimum percentile of average price
         max_missing_pct: float = 0.01     # Maximum allowed missing data
     ) -> Tuple[pd.DataFrame, dict]:
         """
@@ -104,9 +103,8 @@ class DataProcessor:
         Args:
             file_path: Path to price data file
             start_date: Start date for analysis
-            min_market_cap_pct: Minimum percentile of avg price to include
             max_missing_pct: Maximum fraction of missing data allowed
-        
+            
         Returns:
             Cleaned price DataFrame, statistics dictionary
         """
@@ -134,26 +132,47 @@ class DataProcessor:
             raise ValueError("No price columns found in data")
         
         df_prices = df[price_cols].copy()
-        stats['price_columns'] = len(price_cols)
+        stats['initial_stocks'] = len(price_cols)
         
-        # Calculate missing data percentages
+        # Analyze and report missing data for each stock
         missing_pct = df_prices.isnull().mean()
+        for col in df_prices.columns:
+            pct_missing = missing_pct[col]
+            if pct_missing > 0:
+                print(f"WARNING: {col}: {pct_missing:.2%} of data missing")
+                if pct_missing >= max_missing_pct:
+                    print(f"REMOVING {col}: {pct_missing:.2%} missing exceeds {max_missing_pct:.2%} threshold")
+        
+        # Remove stocks with too much missing data
         valid_cols = missing_pct[missing_pct < max_missing_pct].index
+        removed_stocks = set(price_cols) - set(valid_cols)
         df_prices = df_prices[valid_cols]
         
-        stats['removed_missing'] = len(price_cols) - len(valid_cols)
+        stats.update({
+            'removed_stocks': list(removed_stocks),
+            'final_stocks': len(df_prices.columns)
+        })
         
-        stats['final_stocks'] = len(df_prices.columns)
+        # Fill missing data using linear interpolation
+        df_prices = df_prices.interpolate(method='linear', limit_direction='both')
         
-        # Forward fill then backward fill remaining missing values
-        df_prices = df_prices.ffill().bfill()
+        # Report any remaining missing data after interpolation
+        remaining_missing = df_prices.isnull().sum()
+        if remaining_missing.any():
+            print("\nWARNING: Some missing data could not be interpolated:")
+            for col in df_prices.columns:
+                missing_count = remaining_missing[col]
+                if missing_count > 0:
+                    print(f"{col}: {missing_count} values still missing")
         
-        # Final checks
-        stats['final_shape'] = df_prices.shape
-        stats['missing_data_final'] = df_prices.isnull().sum().sum()
+        # Final statistics
+        stats.update({
+            'final_shape': df_prices.shape,
+            'missing_data_final': df_prices.isnull().sum().sum()
+        })
         
         return df_prices, stats
-    
+        
     @staticmethod
     def calculate_returns(
         prices: pd.DataFrame,
