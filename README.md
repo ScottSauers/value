@@ -205,6 +205,7 @@ Must have ALL of:
      - `LongTermDebtNoncurrent`
      - `OperatingLeaseLiabilityNoncurrent`
      - `DeferredTaxLiabilitiesNoncurrent`
+     - `OtherLiabilitiesNoncurrent`
 
 6. **Operating Asset Value**  
    - Most Recent Quarter: `IntangibleAssetsNetExcludingGoodwill` (if available)
