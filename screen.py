@@ -18,6 +18,7 @@ from pyrate_limiter import Duration, RequestRate, Limiter
 import os
 import pickle
 from collections import defaultdict
+from dotenv import load_dotenv
 
 # Suppress specific warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -25,6 +26,28 @@ warnings.filterwarnings('ignore', category=UserWarning)
 
 class CachedLimiterSession(CacheMixin, LimiterMixin, Session):
     pass
+
+def load_environment():
+    """Load environment variables from .env file."""
+    # Try to find .env file in current directory and parent directories
+    current_dir = Path.cwd()
+    env_path = None
+    
+    # Look for .env in current and parent directories
+    while current_dir != current_dir.parent:
+        test_path = current_dir / '.env'
+        if test_path.exists():
+            env_path = test_path
+            break
+        current_dir = current_dir.parent
+    
+    if env_path:
+        print(f"Found .env file at: {env_path}")
+        load_dotenv(env_path)
+        return True
+    else:
+        print("No .env file found in current or parent directories")
+        return False
 
 class MarketCapScreener:
     """Enhanced screener with progressive caching and rate limiting."""
