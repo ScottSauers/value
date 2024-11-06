@@ -329,18 +329,23 @@ class SECDataExtractor:
     
         # Get all unique dates first
         all_dates = set()
-        valid_concepts = []  # Track concepts with valid data
+        valid_concepts = []
+        last_error = None
         for concept in self.SEC_CONCEPTS:
             try:
                 cached_data = self.get_cached_concept(ticker, concept)
                 if cached_data is not None and not cached_data.empty:
                     all_dates.update(cached_data['filing_date'])
-                    valid_concepts.append(concept)  # Regardless of N/A since we already checked empty
-            except Exception:
+                    valid_concepts.append(concept)
+            except Exception as e:
+                last_error = str(e)
                 continue
         
         if not all_dates or not valid_concepts:
-            self.logger.warning(f"No SEC data found for {ticker}")
+            if last_error:
+                self.logger.warning(f"No SEC data found for {ticker}. Last error: {last_error}")
+            else:
+                self.logger.warning(f"No SEC data found for {ticker}")
             return pd.DataFrame()
         
         # Create base dataframe
