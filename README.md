@@ -115,6 +115,135 @@ NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + (PP\&E \
 \text{Present Value of FCF} = \sum_{t=1}^{n} \frac{FCF_t}{(1 + r)^t}
 ```
 
+### Value Ratio Calculation Methodology
+
+**Core Formula**  
+\[
+\text{Value Ratio} = \frac{\text{Net Asset Value} + \text{Present Value of Future Cash Flows}}{\text{Market Cap}}
+\]
+
+**Required Data Components**
+
+**Absolute Requirements**  
+Must have ALL of:
+- Market cap (calculated from price × `CommonStockSharesOutstanding`)
+- `CashAndCashEquivalentsAtCarryingValue`
+- Liabilities or complete liability construction (see Liabilities section)
+- Revenues or `RevenueFromContractWithCustomerExcludingAssessedTax`
+- At least one of: `AccountsReceivableNetCurrent`, `PropertyPlantAndEquipmentNet`, or `InterestExpenseGrossProfitInventoryNet`
+
+**Periods Required**
+
+**Point-in-Time Measures (Most Recent Quarter)**:
+- `CommonStockSharesOutstanding`
+- `CashAndCashEquivalentsAtCarryingValue`
+- `AvailableForSaleSecurities`
+- `AccountsReceivableNetCurrent`
+- `InterestExpenseGrossProfitInventoryNet`
+- `PropertyPlantAndEquipmentNet`
+- `IntangibleAssetsNetExcludingGoodwill`
+- All liability and asset components
+
+**Trailing Twelve Month (TTM) Measures**:
+- `Revenues` or `RevenueFromContractWithCustomerExcludingAssessedTax`
+- `CostOfGoodsAndServicesSold` or `CostOfRevenue`
+- `NetCashProvidedByUsedInOperatingActivities`
+- `PaymentsToAcquirePropertyPlantAndEquipment`
+- `OperatingIncomeLoss`
+- `DepreciationDepletionAndAmortization`
+
+**Component Calculations**
+
+1. **Cash and Marketable Securities**  
+   - Most Recent Quarter: `CashAndCashEquivalentsAtCarryingValue`
+   - Add if available: `AvailableForSaleSecurities`
+
+2. **Accounts Receivable**  
+   - Most Recent Quarter Amount: `AccountsReceivableNetCurrent`
+   - Discount Rate α calculation:
+     \[
+     \alpha = \frac{1}{1 + \frac{\text{AccountsReceivableNetCurrent}}{\text{Revenue}_{\text{TTM}}}}
+     \]
+
+3. **Inventory**  
+   - Most Recent Quarter Amount: `InterestExpenseGrossProfitInventoryNet`
+   - Discount Rate β calculation:
+     \[
+     \beta = \frac{1}{1 + \frac{\text{InterestExpenseGrossProfitInventoryNet}}{\text{Cost}_{\text{TTM}}}}
+     \]
+
+4. **Property, Plant & Equipment**  
+   - Most Recent Quarter Amount: `PropertyPlantAndEquipmentNet`
+   - Discount Rate γ calculation:
+     \[
+     \gamma = \frac{1}{1 + \frac{\text{PropertyPlantAndEquipmentNet}}{\text{Revenue}_{\text{TTM}}}}
+     \]
+
+5. **Liabilities**  
+   - Most Recent Quarter: `Liabilities`
+   - Alternative Construction:
+     - `LiabilitiesCurrent`
+     - `LongTermDebtNoncurrent`
+     - `OperatingLeaseLiabilityNoncurrent`
+     - `DeferredTaxLiabilitiesNoncurrent`
+
+6. **Operating Asset Value**  
+   - Most Recent Quarter: `IntangibleAssetsNetExcludingGoodwill`
+   - Operating Asset multiplier based on industry classification
+
+**Free Cash Flow (FCF) Calculation**
+
+**Primary Method (TTM Basis)**  
+\[
+\text{FCF} = \text{Operating Cash Flow} - \text{Capital Expenditure}
+\]
+
+**Alternative Method (TTM Basis)**  
+If operating cash flow unavailable:
+\[
+\text{FCF} = \text{Base} - \text{Working Capital Change} - \sum \text{PaymentsToAcquirePropertyPlantAndEquipment}
+\]
+
+**TTM Construction Rules**
+- **Primary**: Sum most recent four quarters
+- **Missing Quarter Handling**:
+  - One quarter missing: Linear interpolation
+  - Two non-adjacent quarters available: Scale to annual rate
+  - Only one quarter: Cannot calculate TTM
+
+**Present Value Calculation**  
+\[
+\text{Present Value} = 
+\begin{cases} 
+      \frac{\text{FCF}_{\text{TTM}}}{0.10} & \text{if FCF is positive} \\
+      0 & \text{if no positive FCF in lookback period} 
+   \end{cases}
+\]
+
+**Net Asset Value Assembly**  
+\[
+\text{NAV} = \text{Cash Components} + \text{Discounted Operating Assets} - \text{Total Liabilities}
+\]
+where:
+\[
+\text{Cash Components} = \text{CashAndCashEquivalentsAtCarryingValue} + \text{AvailableForSaleSecurities}
+\]
+\[
+\text{Operating Assets} = (\text{AccountsReceivableNetCurrent} \times \alpha) + (\text{InterestExpenseGrossProfitInventoryNet} \times \beta) + (\text{PropertyPlantAndEquipmentNet} \times \gamma) + \text{IntangibleAssetsNetExcludingGoodwill}
+\]
+
+**Data Quality Requirements**
+- Point-in-time measures from most recent quarter end
+- TTM calculations require a minimum of three quarters
+
+**Warning Conditions**
+- Flag if:
+  - Fewer than three quarters available
+  - Most recent quarter older than 180 days
+  - Required components missing
+  - Negative stockholder equity
+  - Opposing signs for operating cash flow and FCF
+
 ## Portfolio Construction
 
 #### Primary Screens
