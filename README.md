@@ -195,8 +195,8 @@ Must have ALL of:
 **Free Cash Flow (FCF) Calculation**
 
 **Primary Method (TTM Basis)**  
-Operating Cash Flow: Sum last four quarters of `NetCashProvidedByUsedInOperatingActivities`  
-Capital Expenditure: Sum last four quarters of `PaymentsToAcquirePropertyPlantAndEquipment`
+- Operating Cash Flow: Sum last four quarters of `NetCashProvidedByUsedInOperatingActivities`  
+- Capital Expenditure: Sum last four quarters of `PaymentsToAcquirePropertyPlantAndEquipment`
 ```math
 \text{FCF} = \text{Operating Cash Flow} - \text{Capital Expenditure}
 ```
