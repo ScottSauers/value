@@ -387,7 +387,7 @@ class CovarianceEvaluator:
             
             # Split data
             train_rets = returns.loc[train_start:train_end]
-            test_rets = returns.loc[train_end:test_end]
+            test_end = test_start
             
             if len(train_rets) < min_periods:
                 self.logger.print_and_log("Insufficient data in window")
