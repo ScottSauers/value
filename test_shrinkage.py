@@ -339,6 +339,82 @@ class CovarianceEvaluator:
         
         return metrics
 
+
+    def save_window_statistics(self, results: Dict[str, List[dict]], window_info: List[dict], base_dir: Path):
+        """Save per-window statistics to CSV and create visualizations."""
+        # Create directory for outputs if it doesn't exist
+        output_dir = base_dir / 'evaluation_results'
+        output_dir.mkdir(exist_ok=True)
+        
+        # Prepare data for per-window statistics
+        window_stats = []
+        for method, method_results in results.items():
+            for result in method_results:
+                window_data = {
+                    'method': method,
+                    'window': result['window'],
+                    'train_start': window_info[result['window']-1]['train_start'],
+                    'train_end': window_info[result['window']-1]['train_end'],
+                    'test_end': window_info[result['window']-1]['test_end'],
+                    'realized_return': result.get('realized_return', np.nan),
+                    'realized_sharpe': result.get('realized_sharpe', np.nan),
+                    'var_ratio': result.get('var_ratio', np.nan),
+                    'frobenius': result.get('frobenius', np.nan)
+                }
+                window_stats.append(window_data)
+        
+        # Convert to DataFrame and save
+        window_df = pd.DataFrame(window_stats)
+        window_df.to_csv(output_dir / 'window_statistics.csv', index=False)
+        self.logger.print_and_log(f"Saved window statistics to: {output_dir / 'window_statistics.csv'}")
+        
+        # Create visualizations
+        self.create_performance_charts(window_df, output_dir)
+    
+    def create_performance_charts(self, window_df: pd.DataFrame, output_dir: Path):
+        """Create and save performance visualization charts."""
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        plt.style.use('seaborn')
+        
+        metrics = {
+            'realized_return': 'Test Period Returns',
+            'realized_sharpe': 'Test Period Sharpe Ratio',
+            'var_ratio': 'Variance Ratio (Realized/Predicted)'
+        }
+        
+        for metric, title in metrics.items():
+            plt.figure(figsize=(15, 8))
+            
+            # Create line plot for each method
+            for method in window_df['method'].unique():
+                method_data = window_df[window_df['method'] == method]
+                plt.plot(
+                    method_data['test_end'],
+                    method_data[metric],
+                    label=method,
+                    marker='o',
+                    markersize=4,
+                    alpha=0.7
+                )
+            
+            plt.title(f'{title} Over Time by Method')
+            plt.xlabel('Test Period End Date')
+            plt.ylabel(title)
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            
+            # Save plot
+            plt.savefig(
+                output_dir / f'{metric}_over_time.png',
+                bbox_inches='tight',
+                dpi=300
+            )
+            plt.close()
+            
+            self.logger.print_and_log(f"Saved {title} chart to: {output_dir / f'{metric}_over_time.png'}")
+    
     
     def evaluate_rolling_windows(
         self,
@@ -424,6 +500,9 @@ class CovarianceEvaluator:
                     
                 except Exception as e:
                     self.logger.print_and_log(f"Error evaluating {method}: {str(e)}")
+        
+        # Save detailed window statistics and create visualizations
+        self.save_window_statistics(results, window_info, Path("data/transformed"))
         
         # Create summary
         summary = self.create_summary(results, window_info)
