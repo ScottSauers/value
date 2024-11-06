@@ -263,63 +263,81 @@ class CovarianceEvaluator:
         return np.sqrt(np.sum(diff * diff))
     
     def evaluate_estimation(
-            self,
-            est_cov: np.ndarray,
-            true_cov: np.ndarray,
-            est_returns: pd.DataFrame,
-            val_returns: pd.DataFrame,
-            method: str
-        ) -> dict:
-            """Calculate evaluation metrics with optimized portfolio."""
-            metrics = {}
+        self,
+        est_cov: np.ndarray,
+        true_cov: np.ndarray,
+        est_returns: pd.DataFrame,
+        val_returns: pd.DataFrame,
+        method: str
+    ) -> dict:
+        """Calculate evaluation metrics with optimized portfolio."""
+        metrics = {}
+        
+        # Matrix distance metrics
+        metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
+        
+        try:
+            # Get optimized portfolio weights
+            weights, stats = optimize_portfolio(
+                est_returns,
+                est_cov,
+                target_return=0.20,  # 20% annual return target
+                position_limit=0.20   # 20% maximum position size
+            )
             
-            # Matrix distance metrics
-            metrics['frobenius'] = self.frobenius_norm(est_cov, true_cov)
+            # Calculate predicted vs realized risk
+            pred_var = weights @ est_cov @ weights
+            real_var = weights @ true_cov @ weights
             
-            try:
-                # Get optimized portfolio weights
-                weights, stats = optimize_portfolio(
-                    est_returns,
-                    est_cov,
-                    target_return=0.20,  # 20% annual return target
-                    position_limit=0.20   # 20% maximum position size
-                )
-                
-                # Calculate predicted vs realized risk
-                pred_var = weights @ est_cov @ weights
-                real_var = weights @ true_cov @ weights
-                
-                metrics['pred_var'] = pred_var
-                metrics['real_var'] = real_var
-                metrics['var_ratio'] = real_var / pred_var
-                metrics['portfolio_weights'] = weights
-                metrics['portfolio_stats'] = stats
-                
-                # Print detailed results
-                print(f"\nEvaluation results for {method}:")
-                print(f"Frobenius norm: {metrics['frobenius']:.6f}")
-                print(f"Predicted portfolio variance: {metrics['pred_var']:.6f}")
-                print(f"Realized portfolio variance: {metrics['real_var']:.6f}")
-                print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
-                
-                # Print portfolio weights
-                print_portfolio_weights(
-                    weights,
-                    est_returns.columns,
-                    stats
-                )
-                
-            except Exception as e:
-                self.logger.print_and_log(f"Error in variance calculations for method {method}: {str(e)}")
-                metrics.update({
-                    'pred_var': np.nan,
-                    'real_var': np.nan,
-                    'var_ratio': np.nan,
-                    'portfolio_weights': None,
-                    'portfolio_stats': None
-                })
+            # Calculate realized returns on test set
+            test_returns = (weights * val_returns).sum(axis=1)  # Portfolio returns in test period
+            realized_annual_return = test_returns.mean() * 252  # Annualize
+            realized_annual_vol = test_returns.std() * np.sqrt(252)
+            realized_sharpe = realized_annual_return / realized_annual_vol
             
-            return metrics
+            metrics.update({
+                'pred_var': pred_var,
+                'real_var': real_var,
+                'var_ratio': real_var / pred_var,
+                'portfolio_weights': weights,
+                'portfolio_stats': stats,
+                'realized_return': realized_annual_return,
+                'realized_vol': realized_annual_vol,
+                'realized_sharpe': realized_sharpe
+            })
+            
+            # Print detailed results
+            print(f"\nEvaluation results for {method}:")
+            print(f"Frobenius norm: {metrics['frobenius']:.6f}")
+            print(f"Predicted portfolio variance: {metrics['pred_var']:.6f}")
+            print(f"Realized portfolio variance: {metrics['real_var']:.6f}")
+            print(f"Variance ratio (realized/predicted): {metrics['var_ratio']:.3f}")
+            print(f"TEST SET PERFORMANCE:")
+            print(f"Realized Annual Return: {realized_annual_return:.2%}")
+            print(f"Realized Annual Volatility: {realized_annual_vol:.2%}")
+            print(f"Realized Sharpe Ratio: {realized_sharpe:.2f}")
+            
+            # Print portfolio weights
+            print_portfolio_weights(
+                weights,
+                est_returns.columns,
+                stats
+            )
+            
+        except Exception as e:
+            self.logger.print_and_log(f"Error in variance calculations for method {method}: {str(e)}")
+            metrics.update({
+                'pred_var': np.nan,
+                'real_var': np.nan,
+                'var_ratio': np.nan,
+                'portfolio_weights': None,
+                'portfolio_stats': None,
+                'realized_return': np.nan,
+                'realized_vol': np.nan,
+                'realized_sharpe': np.nan
+            })
+        
+        return metrics
 
     
     def evaluate_rolling_windows(
@@ -532,8 +550,8 @@ class CovarianceEvaluator:
         summary_data = []
         
         metrics = [
-            'frobenius', 'var_ratio',
-            'pred_var', 'real_var'
+            'frobenius', 'var_ratio', 'pred_var', 'real_var',
+            'realized_return', 'realized_vol', 'realized_sharpe'
         ]
         
         for method, method_results in results.items():
