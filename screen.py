@@ -50,12 +50,14 @@ def load_environment():
         return False
 
 class MarketCapScreener:
-    """Enhanced screener with progressive caching and rate limiting."""
+    """Screener with progressive caching and rate limiting."""
     
     CACHE_DIR = Path("cache")
     BATCH_SIZE = 2  # Smaller batches for better reliability
     
     def __init__(self, max_workers: int = 20, cache_expiry_days: int = 1, use_cache: bool = True):
+        load_environment()
+
         self.use_cache = use_cache
         print("\nInitializing MarketCapScreener...")
         self.max_workers = max_workers
