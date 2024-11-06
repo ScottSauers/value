@@ -261,3 +261,19 @@ class PortfolioOptimizer:
                 )
         
         return "\n".join(lines)
+    
+    def optimize_portfolio(returns: pd.DataFrame,
+                          cov_matrix: np.ndarray,
+                          target_return: float = 0.20,
+                          position_limit: float = 0.20,
+                          risk_free_rate: float = 0.02) -> tuple:
+        """Wrapper function for backward compatibility"""
+        optimizer = PortfolioOptimizer(returns)
+        return optimizer.optimize(target_return, position_limit)
+    
+    def print_portfolio_weights(weights: np.ndarray, 
+                              asset_names: list,
+                              stats: dict):
+        """Wrapper function for backward compatibility"""
+        optimizer = PortfolioOptimizer(pd.DataFrame(columns=asset_names))
+        print(optimizer.generate_report(weights, PortfolioStats(**stats)))
