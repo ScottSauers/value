@@ -115,11 +115,26 @@ NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + ((PP\&E 
 \text{Present Value of FCF} = \sum_{t=1}^{n} \frac{FCF_t}{(1 + r)^t}
 ```
 
+#### Value Ratio Calculation
+
+```math
+\text{Value Ratio} = \frac{\text{Total Value}}{\text{Market Cap}} = \frac{NAV + \text{Present Value of FCF}}{\text{Market Cap}}
+```
+
+Where:
+```math
+NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + ((PP\&E + Operating\space Lease\space Assets) \times \gamma) - Total\space Liabilities
+```
+
+```math
+\text{Present Value of FCF} = \sum_{t=1}^{n} \frac{FCF_t}{(1 + r)^t}
+```
+
 ### Value Ratio Calculation Methodology
 
 **Core Formula**  
 ```math
-\text{Value Ratio} = \frac{\text{Net Asset Value} + \text{Present Value of Future Cash Flows} + \text{Present Value of Contracted Revenue}}{\text{Market Cap}}
+\text{Value Ratio} = \frac{\text{Net Asset Value} + \text{Present Value of Future Cash Flows}}{\text{Market Cap}}
 ```
 
 **Required Data Components**
@@ -141,11 +156,8 @@ Must have ALL of:
 - `AccountsReceivableNetCurrent`
 - `InterestExpenseGrossProfitInventoryNet`
 - `PropertyPlantAndEquipmentNet`
-- `OperatingLeaseRightOfUseAsset`
+- `OperatingLeaseRightOfUseAsset` (if available)
 - `IntangibleAssetsNetExcludingGoodwill`
-- `CapitalExpendituresIncurredButNotYetPaid`
-- `RevenueRemainingPerformanceObligation`
-- `ContractWithCustomerLiabilityCurrent`
 - All liability components
 - All asset components
 
@@ -154,7 +166,8 @@ Must have ALL of:
 - `CostOfGoodsAndServicesSold` or `CostOfRevenue`
 - `NetCashProvidedByUsedInOperatingActivities`
 - `PaymentsToAcquirePropertyPlantAndEquipment`
-- `PaymentsToAcquireBusinessesNetOfCashAcquired`
+- `CapitalExpendituresIncurredButNotYetPaid` (if available)
+- `PaymentsToAcquireBusinessesNetOfCashAcquired` (if available)
 - `OperatingIncomeLoss`
 - `DepreciationDepletionAndAmortization`
 
@@ -178,7 +191,7 @@ Must have ALL of:
      \beta = \frac{1}{1 + \frac{\text{InterestExpenseGrossProfitInventoryNet}}{\text{Cost}_{\text{TTM}}}}
      ```
 
-4. **Property, Plant & Equipment and Operating Lease Assets**  
+4. **Property, Plant & Equipment**  
    - Most Recent Quarter Amount: `PropertyPlantAndEquipmentNet` + `OperatingLeaseRightOfUseAsset` (if available)
    - Discount Rate γ calculation:
      ```math
@@ -192,7 +205,6 @@ Must have ALL of:
      - `LongTermDebtNoncurrent`
      - `OperatingLeaseLiabilityNoncurrent`
      - `DeferredTaxLiabilitiesNoncurrent`
-     - `ContractWithCustomerLiabilityCurrent`
 
 6. **Operating Asset Value**  
    - Most Recent Quarter: `IntangibleAssetsNetExcludingGoodwill` (if available)
@@ -202,7 +214,7 @@ Must have ALL of:
 
 **Primary Method (TTM Basis)**  
 - Operating Cash Flow: Sum last four quarters of `NetCashProvidedByUsedInOperatingActivities`
-- Capital Expenditure: Sum last four quarters of (`PaymentsToAcquirePropertyPlantAndEquipment` + `CapitalExpendituresIncurredButNotYetPaid` - `PaymentsToAcquireBusinessesNetOfCashAcquired`)
+- Capital Expenditure: Sum last four quarters of (`PaymentsToAcquirePropertyPlantAndEquipment` + `CapitalExpendituresIncurredButNotYetPaid` (if available) - `PaymentsToAcquireBusinessesNetOfCashAcquired` (if available))
 ```math
 \text{FCF} = \text{Operating Cash Flow} - \text{Capital Expenditure}
 ```
@@ -225,20 +237,15 @@ For any flow measure:
 **Present Value Calculation**  
 If current TTM FCF is positive:
 ```math
-\text{Present Value of FCF} = \frac{\text{FCF}_{\text{TTM}}}{0.10}
+\text{Present Value} = \frac{\text{FCF}_{\text{TTM}}}{0.10}
 ```
 If current TTM FCF is negative:
 - Examine each of previous four TTM periods
 - Use most recent positive FCF if available
 - If no positive FCF in lookback period:
   ```math
-  \text{Present Value of FCF} = 0
+  \text{Present Value} = 0
   ```
-
-If `RevenueRemainingPerformanceObligation` available:
-```math
-\text{Present Value of Contracted Revenue} = \frac{\text{RevenueRemainingPerformanceObligation}}{0.10}
-```
 
 **Net Asset Value Assembly**  
 ```math
@@ -268,7 +275,6 @@ Flag if:
 - Negative stockholder equity (`StockholdersEquity`)
 - Operating cash flow and FCF have opposite signs
 - Operating lease assets present without corresponding liabilities or vice versa
-- Contracted revenue obligations exceed historical revenue run rate by >100%
 
 ## Portfolio Construction
 
