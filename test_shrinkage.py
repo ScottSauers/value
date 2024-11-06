@@ -91,87 +91,119 @@ class DataProcessor:
         else:
             raise ValueError(f"Could not determine consistent delimiter for {file_path}")
     
-    @staticmethod
-    def load_price_data(
-        file_path: str,
-        start_date: str,
-        max_missing_pct: float = 0.01     # Maximum allowed missing data
-    ) -> Tuple[pd.DataFrame, dict]:
-        """
-        Load and clean price data with detailed statistics.
+@staticmethod
+def load_price_data(
+    file_path: str,
+    start_date: str,
+    max_missing_pct: float = 0.01,     # Maximum allowed missing data
+) -> Tuple[pd.DataFrame, dict]:
+    """
+    Load and clean price data with detailed statistics.
+    
+    Args:
+        file_path: Path to price data file
+        start_date: Start date for analysis
+        max_missing_pct: Maximum fraction of missing data allowed
+        max_stocks_display: Maximum number of stocks to display in warnings
         
-        Args:
-            file_path: Path to price data file
-            start_date: Start date for analysis
-            max_missing_pct: Maximum fraction of missing data allowed
-            
-        Returns:
-            Cleaned price DataFrame, statistics dictionary
-        """
-        stats = {}
+    Returns:
+        Cleaned price DataFrame, statistics dictionary
+    """
+    stats = {}
+    max_stocks_display = 50
+    
+    # Load data
+    sep = DataProcessor.determine_separator(str(file_path))
+    df = pd.read_csv(
+        file_path,
+        sep=sep,
+        skipinitialspace=True,
+        dtype={'date': str}
+    )
+    
+    print(f"\nLoading data from {file_path}")
+    stats['initial_shape'] = df.shape
+    print(f"Initial data shape: {df.shape}")
+    
+    # Process dates
+    df['date'] = pd.to_datetime(df['date'])
+    df = df[df['date'] >= start_date].copy()
+    df.set_index('date', inplace=True)
+    print(f"Date range: {df.index.min()} to {df.index.max()}")
+    
+    # Get price columns
+    price_cols = [col for col in df.columns if col.endswith('_close')]
+    if not price_cols:
+        raise ValueError("No price columns found in data")
+    
+    df_prices = df[price_cols].copy()
+    stats['initial_stocks'] = len(price_cols)
+    print(f"\nFound {len(price_cols)} price columns")
+    
+    # Analyze missing data for each stock
+    print(f"\nAnalyzing missing data (max allowed: {max_missing_pct:.1%})")
+    missing_pct = df_prices.isnull().mean()
+    stocks_with_missing = missing_pct[missing_pct > 0].sort_values(ascending=False)
+    
+    if len(stocks_with_missing) > 0:
+        print("\nStocks with missing data:")
+        for i, (col, pct) in enumerate(stocks_with_missing.items()):
+            if i < max_stocks_display:
+                print(f"{col}: {pct:.2%} missing")
+            elif i == max_stocks_display:
+                remaining = len(stocks_with_missing) - max_stocks_display
+                print(f"... and {remaining} more stocks with missing data")
+    
+    # Remove stocks with too much missing data
+    valid_cols = missing_pct[missing_pct < max_missing_pct].index
+    removed_stocks = set(price_cols) - set(valid_cols)
+    
+    if removed_stocks:
+        print(f"\nRemoving {len(removed_stocks)} stocks exceeding {max_missing_pct:.1%} missing data:")
+        for i, stock in enumerate(sorted(removed_stocks)):
+            if i < max_stocks_display:
+                print(f"{stock}: {missing_pct[stock]:.2%} missing")
+            elif i == max_stocks_display:
+                remaining = len(removed_stocks) - max_stocks_display
+                print(f"... and {remaining} more stocks removed")
+    
+    df_prices = df_prices[valid_cols]
+    
+    stats.update({
+        'removed_stocks': list(removed_stocks),
+        'final_stocks': len(df_prices.columns)
+    })
+    
+    # Fill missing data using linear interpolation
+    print("\nFilling remaining missing values with linear interpolation...")
+    df_prices = df_prices.interpolate(method='linear', limit_direction='both')
+    
+    # Report any remaining missing data after interpolation
+    remaining_missing = df_prices.isnull().sum()
+    stocks_still_missing = remaining_missing[remaining_missing > 0]
+    
+    if len(stocks_still_missing) > 0:
+        print("\nWARNING: Some missing data could not be interpolated:")
+        for i, (col, count) in enumerate(stocks_still_missing.items()):
+            if i < max_stocks_display:
+                print(f"{col}: {count} values still missing")
+            elif i == max_stocks_display:
+                remaining = len(stocks_still_missing) - max_stocks_display
+                print(f"... and {remaining} more stocks with uninterpolated values")
         
-        # Load data
-        sep = DataProcessor.determine_separator(str(file_path))
-        df = pd.read_csv(
-            file_path,
-            sep=sep,
-            skipinitialspace=True,
-            dtype={'date': str}
-        )
-        
-        stats['initial_shape'] = df.shape
-        
-        # Process dates
-        df['date'] = pd.to_datetime(df['date'])
-        df = df[df['date'] >= start_date].copy()
-        df.set_index('date', inplace=True)
-        
-        # Get price columns
-        price_cols = [col for col in df.columns if col.endswith('_close')]
-        if not price_cols:
-            raise ValueError("No price columns found in data")
-        
-        df_prices = df[price_cols].copy()
-        stats['initial_stocks'] = len(price_cols)
-        
-        # Analyze and report missing data for each stock
-        missing_pct = df_prices.isnull().mean()
-        for col in df_prices.columns:
-            pct_missing = missing_pct[col]
-            if pct_missing > 0:
-                print(f"WARNING: {col}: {pct_missing:.2%} of data missing")
-                if pct_missing >= max_missing_pct:
-                    print(f"REMOVING {col}: {pct_missing:.2%} missing exceeds {max_missing_pct:.2%} threshold")
-        
-        # Remove stocks with too much missing data
-        valid_cols = missing_pct[missing_pct < max_missing_pct].index
-        removed_stocks = set(price_cols) - set(valid_cols)
-        df_prices = df_prices[valid_cols]
-        
-        stats.update({
-            'removed_stocks': list(removed_stocks),
-            'final_stocks': len(df_prices.columns)
-        })
-        
-        # Fill missing data using linear interpolation
-        df_prices = df_prices.interpolate(method='linear', limit_direction='both')
-        
-        # Report any remaining missing data after interpolation
-        remaining_missing = df_prices.isnull().sum()
-        if remaining_missing.any():
-            print("\nWARNING: Some missing data could not be interpolated:")
-            for col in df_prices.columns:
-                missing_count = remaining_missing[col]
-                if missing_count > 0:
-                    print(f"{col}: {missing_count} values still missing")
-        
-        # Final statistics
-        stats.update({
-            'final_shape': df_prices.shape,
-            'missing_data_final': df_prices.isnull().sum().sum()
-        })
-        
-        return df_prices, stats
+        # Remove any stocks with remaining missing data
+        df_prices = df_prices.dropna(axis=1)
+        print(f"Removed {len(stocks_still_missing)} stocks with uninterpolatable missing data")
+    
+    # Final statistics
+    stats.update({
+        'final_shape': df_prices.shape,
+        'missing_data_final': df_prices.isnull().sum().sum()
+    })
+    
+    print(f"\nFinal dataset: {df_prices.shape[1]} stocks, {df_prices.shape[0]} days")
+    
+    return df_prices, stats
         
     @staticmethod
     def calculate_returns(
