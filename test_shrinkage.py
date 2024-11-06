@@ -19,6 +19,8 @@ import sys
 from scipy import linalg
 from datetime import datetime, timedelta
 import warnings
+from weights import optimize_portfolio, print_portfolio_weights
+
 warnings.filterwarnings('ignore')  # Suppress warnings for cleaner output
 
 class ResultLogger:
