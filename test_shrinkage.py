@@ -126,7 +126,7 @@ class DataProcessor:
         print(f"Initial data shape: {df.shape}")
         
         # Process dates
-        df['date'] = pd.to_datetime(df['date'])
+        df['date'] = pd.to_datetime(df['date'], format='%m/%d/%y') 
         df = df[df['date'] >= start_date].copy()
         df.set_index('date', inplace=True)
         print(f"Date range: {df.index.min()} to {df.index.max()}")
