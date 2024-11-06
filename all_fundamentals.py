@@ -500,6 +500,7 @@ def parallel_process_tickers(
     # Read ticker list
     try:
         df = pd.read_csv(input_file)
+        df[ticker_column] = df[ticker_column].astype(str).str.strip()  # Convert to string and strip whitespace
         tickers = df[ticker_column].unique().tolist()
         logger.info(f"📋 Found {len(tickers)} unique tickers to process")
     except Exception as e:
