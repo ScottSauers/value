@@ -536,7 +536,6 @@ def main():
         df_prices, price_stats = DataProcessor.load_price_data(
             str(latest_daily),
             start_date,
-            min_market_cap_pct=0.5,
             max_missing_pct=0.01
         )
         
