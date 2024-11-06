@@ -77,86 +77,46 @@ class SECDataExtractor:
     
     # Comprehensive list of SEC concepts to collect
     SEC_CONCEPTS = [
-        # Balance Sheet - Assets
-        SECConcept("Assets"),
-        SECConcept("AssetsCurrent"),
-        SECConcept("AssetsNoncurrent"),
+        # Assets
         SECConcept("CashAndCashEquivalentsAtCarryingValue"),
-        SECConcept("MarketableSecurities"),
-        SECConcept("AvailableForSaleSecurities"),
-        SECConcept("AccountsReceivableNetCurrent"),
+        SECConcept("PropertyPlantAndEquipmentNet"), 
         SECConcept("InventoryNet"),
-        SECConcept("PrepaidExpenseAndOtherAssetsCurrent"),
-        SECConcept("PropertyPlantAndEquipmentNet"),
-        SECConcept("Goodwill"),
+        SECConcept("AccountsReceivableNetCurrent"),
+        SECConcept("AvailableForSaleSecurities"),
         SECConcept("OperatingLeaseRightOfUseAsset"),
         SECConcept("IntangibleAssetsNetExcludingGoodwill"),
-        SECConcept("OtherAssets"),
-        
-        # Balance Sheet - Liabilities
+        SECConcept("PropertyPlantAndEquipmentGross"),
+        SECConcept("AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"),
+    
+        # Liabilities
         SECConcept("Liabilities"),
         SECConcept("LiabilitiesCurrent"),
-        SECConcept("AccountsPayableCurrent"),
-        SECConcept("AccruedLiabilitiesCurrent"),
-        SECConcept("ContractWithCustomerLiabilityCurrent"),
-        SECConcept("OperatingLeaseLiabilityCurrent"),
-        SECConcept("ShortTermBorrowings"),
-        SECConcept("LongTermDebtCurrent"),
         SECConcept("LongTermDebtNoncurrent"),
         SECConcept("OperatingLeaseLiabilityNoncurrent"),
         SECConcept("DeferredTaxLiabilitiesNoncurrent"),
         SECConcept("OtherLiabilitiesNoncurrent"),
-        
-        # Stockholders' Equity
-        SECConcept("StockholdersEquity"),
-        SECConcept("CommonStockParOrStatedValuePerShare"),
-        SECConcept("CommonStockSharesAuthorized"),
-        SECConcept("CommonStockSharesIssued"),
+    
+        # Equity & Share Data
         SECConcept("CommonStockSharesOutstanding"),
-        SECConcept("RetainedEarningsAccumulatedDeficit"),
-        SECConcept("AccumulatedOtherComprehensiveIncomeLossNetOfTax"),
-        
+        SECConcept("StockholdersEquity"),
+    
         # Income Statement
         SECConcept("Revenues"),
-        SECConcept("CostOfRevenue"),
         SECConcept("CostOfGoodsAndServicesSold"),
-        SECConcept("GrossProfit"),
-        SECConcept("ResearchAndDevelopmentExpense"),
-        SECConcept("SellingGeneralAndAdministrativeExpense"),
-        SECConcept("OperatingExpenses"),
+        SECConcept("CostOfRevenue"),
         SECConcept("OperatingIncomeLoss"),
-        SECConcept("NonoperatingIncomeExpense"),
-        SECConcept("InterestExpense"),
-        SECConcept("OtherNonoperatingIncomeExpense"),
-        SECConcept("IncomeTaxExpenseBenefit"),
-        SECConcept("NetIncomeLoss"),
-        SECConcept("ComprehensiveIncomeNetOfTax"),
-        
-        # Per Share Data
-        SECConcept("EarningsPerShareBasic", units="USD/shares"),
-        SECConcept("EarningsPerShareDiluted", units="USD/shares"),
-        SECConcept("WeightedAverageNumberOfSharesOutstandingBasic", units="shares"),
-        SECConcept("WeightedAverageNumberOfDilutedSharesOutstanding", units="shares"),
-        
-        # Cash Flow
-        SECConcept("NetCashProvidedByUsedInOperatingActivities"),
-        SECConcept("NetCashProvidedByUsedInInvestingActivities"),
-        SECConcept("NetCashProvidedByUsedInFinancingActivities"),
         SECConcept("DepreciationDepletionAndAmortization"),
-        SECConcept("ShareBasedCompensation"),
-        SECConcept("CapitalExpendituresIncurredButNotYetPaid"),
+    
+        # Cash Flow & Related
+        SECConcept("NetCashProvidedByUsedInOperatingActivities"),
         SECConcept("PaymentsToAcquirePropertyPlantAndEquipment"),
+        SECConcept("CapitalExpendituresIncurredButNotYetPaid"),
         SECConcept("PaymentsToAcquireBusinessesNetOfCashAcquired"),
-        SECConcept("ProceedsFromIssuanceOfLongTermDebt"),
-        SECConcept("RepaymentsOfLongTermDebt"),
-        SECConcept("PaymentsOfDividends"),
-        SECConcept("PaymentsForRepurchaseOfCommonStock"),
         
-        # Other Metrics
-        SECConcept("CommitmentsAndContingencies"),
-        SECConcept("LeaseCost"),
+        # Other
         SECConcept("RevenueFromContractWithCustomerExcludingAssessedTax"),
-        SECConcept("RevenueRemainingPerformanceObligation")
+        SECConcept("IncreaseDecreaseInAccountsReceivable"),
+        SECConcept("IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets")
     ]
 
     # Class-level variables for rate limiting
