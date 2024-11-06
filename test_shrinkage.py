@@ -170,7 +170,6 @@ class DataProcessor:
         df_prices = df_prices[valid_cols]
         
         stats.update({
-            'removed_stocks': list(removed_stocks),
             'final_stocks': len(df_prices.columns)
         })
         
