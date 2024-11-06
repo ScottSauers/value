@@ -140,7 +140,7 @@ class SECDataExtractor:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(self.output_dir / 'sec_data.log'),
