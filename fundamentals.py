@@ -209,6 +209,7 @@ class SECDataExtractor:
                     ''', (ticker, concept.tag, concept.taxonomy, concept.units))
                     conn.commit()
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
+                    print(f"Concept {concept.tag} for {ticker} returned 'N/A'")
                     return
                 
                 # Prepare data for caching (your existing code)
@@ -221,8 +222,9 @@ class SECDataExtractor:
                     ''', (ticker, concept.tag, concept.taxonomy, concept.units))
                     conn.commit()
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag} due to missing tag in data")
+                    print(f"Concept {concept.tag} for {ticker} returned 'N/A' due to missing tag in data")
                     return
-    
+
                 # Rename and prepare your dataframe as before
                 cache_df = cache_df.rename(columns={concept.tag: 'concept_value'})
                 cache_df['ticker'] = ticker
@@ -231,13 +233,13 @@ class SECDataExtractor:
                 cache_df['units'] = concept.units
                 cache_df['fetch_status'] = 'N/A' if cache_df['concept_value'].iloc[0] == 'N/A' else 'success'
                 cache_df['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+
                 # Delete existing data for this ticker/concept combination
                 conn.execute('''
                     DELETE FROM concept_cache
                     WHERE ticker = ? AND concept_tag = ?
                 ''', (ticker, concept.tag))
-    
+
                 # Insert new data using explicit INSERT
                 for _, row in cache_df.iterrows():
                     conn.execute('''
@@ -262,6 +264,7 @@ class SECDataExtractor:
                     self.logger.info(f"Successfully cached data for {ticker} {concept.tag}")
                 elif status == 'N/A':
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
+                    print(f"Concept {concept.tag} for {ticker} returned 'N/A'")
                         
             except Exception as e:
                 conn.rollback()
@@ -318,12 +321,13 @@ class SECDataExtractor:
                 self.logger.warning(f"No data found for {tag} and {ticker} (404). Error: {error_str}")
             else:
                 self.logger.warning(f"Error fetching {tag} for {ticker}: {error_str}")
+            print(f"Error fetching concept {tag} for ticker {ticker}: {error_str}")
             return pd.DataFrame({
                 'end': [datetime.now().strftime('%Y-%m-%d')],
                 'value': ['N/A'],
                 'filed': [datetime.now().strftime('%Y-%m-%d')]
             })
-    
+
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """Retrieve SEC fundamental data with efficient memory management."""
         CHUNK_SIZE = 10  # Process concepts in batches of 10
@@ -335,7 +339,7 @@ class SECDataExtractor:
                 elif df[col].dtype == 'int64':
                     df[col] = pd.to_numeric(df[col], downcast='integer')
             return df
-    
+
         # Get all unique dates first
         all_dates = set()
         valid_concepts = []
@@ -355,6 +359,7 @@ class SECDataExtractor:
                 self.logger.warning(f"No SEC data found for {ticker}. Last error: {last_error}")
             else:
                 self.logger.warning(f"No SEC data found for {ticker}")
+            print(f"No SEC data found for ticker {ticker}.")
             return pd.DataFrame()
         
         # Create base dataframe
@@ -428,7 +433,7 @@ class SECDataExtractor:
                     memory_usage = result_df.memory_usage(deep=True).sum()
                     self.logger.info(f"Size after merging {concept.tag}: {result_df.shape}, Memory: {memory_usage/1024/1024:.2f}MB ({memory_usage/1024/1024/1024:.3f}GB)")
                     continue
-     
+ 
                 df = self.rate_limited_get(
                     tag=concept.tag,
                     ticker=ticker,
@@ -471,6 +476,7 @@ class SECDataExtractor:
                     else:
                         self.logger.info(f"No data available for {concept.tag} and {ticker}")
                         self.cache_concept_data(ticker, concept, df)
+                        print(f"Concept {concept.tag} for {ticker} returned 'N/A'")
                     
             except Exception as e:
                 self.logger.debug(f"Failed to retrieve {concept.tag} data for {ticker}: {str(e)}")
@@ -539,9 +545,10 @@ class SECDataExtractor:
             # Check if all concepts are 'N/A'
             if df.empty or all(df[col].iloc[0] == 'N/A' for col in df.columns if col != 'filing_date'):
                 self.logger.warning(f"All concepts returned 'N/A' for {ticker}. Skipping save.")
+                print(f"All concepts returned 'N/A' for ticker {ticker}.")
                 return ("N/A", "N/A")
             
-            # Sort DataFrame consistently to ensure same content produces same hash
+            # Sort DataFrame consistently to have same content produces same hash
             df = df.sort_values(['filing_date'] + list(df.columns.drop('filing_date')))
             df = df.reset_index(drop=True)
             
@@ -549,6 +556,7 @@ class SECDataExtractor:
             
         except Exception as e:
             self.logger.error(f"Failed to process {ticker}: {str(e)}")
+            print(f"Failed to process ticker {ticker}: {str(e)}")
             raise
 
 def main():
