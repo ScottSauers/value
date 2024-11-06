@@ -306,12 +306,14 @@ class SECDataExtractor:
         except Exception as e:
             error_str = str(e)
             if "404" in error_str:
-                self.logger.info(f"No data found for {tag} and {ticker} (404)")
-                return pd.DataFrame({
-                    'end': [datetime.now().strftime('%Y-%m-%d')],
-                    'value': ['N/A'],
-                    'filed': [datetime.now().strftime('%Y-%m-%d')]
-                })
+                self.logger.warning(f"No data found for {tag} and {ticker} (404). Error: {error_str}")
+            else:
+                self.logger.warning(f"Error fetching {tag} for {ticker}: {error_str}")
+            return pd.DataFrame({
+                'end': [datetime.now().strftime('%Y-%m-%d')],
+                'value': ['N/A'],
+                'filed': [datetime.now().strftime('%Y-%m-%d')]
+            })
     
     def get_sec_data(self, ticker: str) -> pd.DataFrame:
         """Retrieve SEC fundamental data with efficient memory management."""
