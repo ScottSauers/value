@@ -227,7 +227,7 @@ Must have ALL of:
 **Alternative Method (TTM Basis)**  
 If operating cash flow unavailable:
 ```math
-\text{FCF} = \text{Base} - \text{Working Capital Change} - \sum \text{PaymentsToAcquirePropertyPlantAndEquipment}
+\text{FCF} = (\text{OperatingIncomeLoss} + \text{DepreciationDepletionAndAmortization}) - (\text{IncreaseDecreaseInAccountsReceivable} + \text{IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets}) - \text{PaymentsToAcquirePropertyPlantAndEquipment}
 ```
 
 **TTM Construction Rules**  
