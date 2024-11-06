@@ -275,34 +275,25 @@ class CovarianceEvaluator:
     def evaluate_rolling_windows(
         self,
         returns: pd.DataFrame,
-        train_window: int = 300,  # 252 is 1 year
-        test_window: int = 300,   # 252 is 1 year test
-        min_periods: int = 100,
+        lookback_days: int = 378,
+        test_window: int = 63,
+        min_periods: int = 252,    # Minimum required periods
         methods: list = ['identity', 'const_corr', 'single_factor', 'rscm', 'dual_shrinkage', 'nonlinear']
     ) -> Tuple[pd.DataFrame, Dict[str, List[dict]]]:
         """
-        Evaluate methods using rolling windows of train/test data.
-        
-        Args:
-            returns: Returns DataFrame
-            train_window: Training window length
-            test_window: Testing window length
-            min_periods: Minimum required periods
-            methods: List of methods to evaluate
-            
-        Returns:
-            Summary DataFrame, detailed results dictionary
+        Evaluate methods using rolling windows with fixed lookback.
         """
         self.logger.print_and_log("Starting rolling window evaluation")
         
         results = {method: [] for method in methods + ['sample']}
         window_info = []
         
-        # Rolling windows
-        for t in range(0, len(returns) - train_window - test_window + 1, test_window):
-            train_start = returns.index[t]
-            train_end = returns.index[t + train_window - 1]
-            test_end = returns.index[min(t + train_window + test_window - 1, len(returns) - 1)]
+        # Rolling windows with fixed lookback
+        for t in range(lookback_days, len(returns) - test_window + 1, test_window):
+            # Fixed lookback window regardless of test period
+            train_start = returns.index[t - lookback_days]
+            train_end = returns.index[t - 1]  # Day before test starts
+            test_end = returns.index[min(t + test_window - 1, len(returns) - 1)]
             
             window_info.append({
                 'train_start': train_start,
