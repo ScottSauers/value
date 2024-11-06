@@ -115,7 +115,6 @@ NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + (PP\&E \
 \text{Present Value of FCF} = \sum_{t=1}^{n} \frac{FCF_t}{(1 + r)^t}
 ```
 
-```markdown
 ### Value Ratio Calculation Methodology
 
 **Core Formula**  
