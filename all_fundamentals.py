@@ -23,7 +23,7 @@ import psutil
 import threading
 
 class CacheManager:
-    MIN_CONCEPT_THRESHOLD = 100  # Minimum concepts required for a ticker to be considered fully processed
+    MIN_CONCEPT_THRESHOLD = 24  # Minimum concepts required for a ticker to be considered fully processed
     
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
@@ -584,7 +584,7 @@ def parallel_process_tickers(
                         progress_tracker.update_progress(completed_total)
                         
                         # Save and clear results periodically
-                        if len(results) > 1000:
+                        if len(results) > 100:
                             results = save_batch_results(results, batch_num)
                     except Exception as e:
                         logger.error(f"Batch processing error: {str(e)}")
