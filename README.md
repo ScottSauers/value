@@ -17,6 +17,7 @@ Investors pay a premium for liquidity. Therefore, illiquid stocks may have highe
 - Create an .env file with your API keys.
 - Run screen.py to get small cap stocks.
 - Run all_fundamentals.py to get fundamentals.
+- Run test_shrinkage.py to test covariance matrix shrinkage methods.
 
 ## Asset Value Calculation
 
