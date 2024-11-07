@@ -23,13 +23,13 @@ class SECConcept:
 
 class SECDataExtractor:
     _init_lock = threading.Lock()
-    
+
     def _init_granular_cache(self):
         with SECDataExtractor._init_lock:
             with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
                 try:
                     conn.execute('BEGIN IMMEDIATE')
-                    
+
                     # Table for storing individual concept data points with fetch status
                     conn.execute('''
                         CREATE TABLE IF NOT EXISTS concept_cache (
@@ -44,7 +44,7 @@ class SECDataExtractor:
                             PRIMARY KEY (ticker, concept_tag, filing_date)
                         )
                     ''')
-                    
+
                     # Table for tracking concept fetch status with more detail
                     conn.execute('''
                         CREATE TABLE IF NOT EXISTS concept_status (
@@ -57,17 +57,17 @@ class SECDataExtractor:
                             PRIMARY KEY (ticker, concept_tag)
                         )
                     ''')
-                    
+
                     # Create indices for better performance
                     conn.execute('''
-                        CREATE INDEX IF NOT EXISTS idx_concept_cache_ticker 
+                        CREATE INDEX IF NOT EXISTS idx_concept_cache_ticker
                         ON concept_cache(ticker)
                     ''')
                     conn.execute('''
-                        CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated 
+                        CREATE INDEX IF NOT EXISTS idx_concept_cache_last_updated
                         ON concept_cache(last_updated)
                     ''')
-                    
+
                     conn.commit()
                     self.logger.info("Initialized granular_cache.db with concept_cache and concept_status tables.")
                     print("✅ Successfully initialized granular_cache.db with required tables.")
@@ -76,12 +76,12 @@ class SECDataExtractor:
                     self.logger.error(f"Error initializing granular_cache.db: {e}")
                     print(f"❌ Error initializing granular_cache.db: {e}")
                     raise
-    
+
     # Comprehensive list of SEC concepts to collect
     SEC_CONCEPTS = [
         # Assets
         SECConcept("CashAndCashEquivalentsAtCarryingValue"),
-        SECConcept("PropertyPlantAndEquipmentNet"), 
+        SECConcept("PropertyPlantAndEquipmentNet"),
         SECConcept("InventoryNet"),
         SECConcept("AccountsReceivableNetCurrent"),
         SECConcept("AvailableForSaleSecurities"),
@@ -89,7 +89,7 @@ class SECDataExtractor:
         SECConcept("IntangibleAssetsNetExcludingGoodwill"),
         SECConcept("PropertyPlantAndEquipmentGross"),
         SECConcept("AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"),
-    
+
         # Liabilities
         SECConcept("Liabilities"),
         SECConcept("LiabilitiesCurrent"),
@@ -97,24 +97,24 @@ class SECDataExtractor:
         SECConcept("OperatingLeaseLiabilityNoncurrent"),
         SECConcept("DeferredTaxLiabilitiesNoncurrent"),
         SECConcept("OtherLiabilitiesNoncurrent"),
-    
+
         # Equity & Share Data
         SECConcept("CommonStockSharesOutstanding"),
         SECConcept("StockholdersEquity"),
-    
+
         # Income Statement
         SECConcept("Revenues"),
         SECConcept("CostOfGoodsAndServicesSold"),
         SECConcept("CostOfRevenue"),
         SECConcept("OperatingIncomeLoss"),
         SECConcept("DepreciationDepletionAndAmortization"),
-    
+
         # Cash Flow & Related
         SECConcept("NetCashProvidedByUsedInOperatingActivities"),
         SECConcept("PaymentsToAcquirePropertyPlantAndEquipment"),
         SECConcept("CapitalExpendituresIncurredButNotYetPaid"),
         SECConcept("PaymentsToAcquireBusinessesNetOfCashAcquired"),
-        
+
         # Other
         SECConcept("RevenueFromContractWithCustomerExcludingAssessedTax"),
         SECConcept("IncreaseDecreaseInAccountsReceivable"),
@@ -134,15 +134,15 @@ class SECDataExtractor:
         sec_user_agent = os.getenv('SEC_API_USER_AGENT')
         if not sec_user_agent:
             raise ValueError("SEC_API_USER_AGENT environment variable not set")
-        
+
         # Set the user agent for finagg
         finagg.sec.api.USER_AGENT = sec_user_agent
         print(f"🔍 SEC_API_USER_AGENT set to: {sec_user_agent}")
-        
+
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         print(f"📁 Output directory set to: {self.output_dir.resolve()}")
-        
+
         logging.basicConfig(
             level=logging.DEBUG,
             format='%(asctime)s - %(levelname)s - %(message)s',
@@ -154,7 +154,7 @@ class SECDataExtractor:
         self.logger = logging.getLogger(__name__)
         self.logger.debug("Logger initialized with DEBUG level.")
         print("📝 Logging initialized. All DEBUG level logs will be recorded.")
-        
+
         self.cache_dir = Path(output_dir) / 'cache'
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         print(f"🗄️ Cache directory set to: {self.cache_dir.resolve()}")
@@ -165,7 +165,7 @@ class SECDataExtractor:
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
             query = '''
                 SELECT filing_date, concept_value as value
-                FROM concept_cache 
+                FROM concept_cache
                 WHERE ticker = ? AND concept_tag = ?
                 AND last_updated > datetime('now', '-7 days')
                 ORDER BY filing_date DESC
@@ -188,7 +188,6 @@ class SECDataExtractor:
                 print(f"❌ Cache retrieval failed for {ticker}, concept {concept.tag}: {e}")
         return None
 
-    
     def cache_concept_data(self, ticker: str, concept: SECConcept, data: pd.DataFrame):
         """Cache the data for a specific concept with explicit missing data handling."""
         with sqlite3.connect(str(self.cache_dir / 'granular_cache.db')) as conn:
@@ -196,29 +195,7 @@ class SECDataExtractor:
                 self.logger.debug(f"Attempting to cache data for {ticker}, concept {concept.tag}")
                 print(f"💾 Caching data for {ticker}, concept {concept.tag}")
                 conn.execute('BEGIN IMMEDIATE')
-                
-                # First check if table exists with correct schema
-                cursor = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='concept_cache'")
-                existing_table = cursor.fetchone()
-                
-                if not existing_table:
-                    # If table doesn't exist, create it with correct schema
-                    self.logger.debug("concept_cache table does not exist. Creating table.")
-                    print("🛠️ concept_cache table does not exist. Creating table.")
-                    conn.execute('''
-                        CREATE TABLE concept_cache (
-                            ticker TEXT,
-                            concept_tag TEXT,
-                            filing_date TEXT,
-                            concept_value REAL,
-                            taxonomy TEXT,
-                            units TEXT,
-                            fetch_status TEXT DEFAULT 'unknown',
-                            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            PRIMARY KEY (ticker, concept_tag, filing_date)
-                        )
-                    ''')
-                
+
                 # Handle missing or empty data
                 if data is None or data.empty:
                     self.logger.warning(f"No data to cache for {ticker}, concept {concept.tag}. Inserting 'N/A'.")
@@ -232,7 +209,7 @@ class SECDataExtractor:
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
                     print(f"✅ Cached 'N/A' for {ticker}, concept {concept.tag}")
                     return
-                
+
                 # Check if the expected concept tag is in the data
                 if concept.tag not in data.columns:
                     self.logger.warning(f"Data for {ticker}, concept {concept.tag} does not contain the expected tag. Inserting 'N/A'.")
@@ -279,9 +256,9 @@ class SECDataExtractor:
                         row['fetch_status'],
                         row['last_updated']
                     ))
-                
+
                 conn.commit()
-                
+
                 status = cache_df['fetch_status'].iloc[0]
                 if status == 'success':
                     self.logger.info(f"Successfully cached data for {ticker} {concept.tag}")
@@ -289,7 +266,7 @@ class SECDataExtractor:
                 elif status == 'N/A':
                     self.logger.info(f"Cached 'N/A' for {ticker} {concept.tag}")
                     print(f"✅ Cached 'N/A' for {ticker}, concept {concept.tag}")
-                        
+
             except Exception as e:
                 conn.rollback()
                 self.logger.error(f"Error caching data for {ticker} {concept.tag}: {e}")
@@ -302,7 +279,7 @@ class SECDataExtractor:
             self.logger.debug(f"Caching error for {ticker}, concept {concept.tag}: {error}")
             print(f"🛑 Caching error for {ticker}, concept {concept.tag}: {error}")
             conn.execute('''
-                INSERT OR REPLACE INTO concept_status 
+                INSERT OR REPLACE INTO concept_status
                 (ticker, concept_tag, last_attempt, status, error)
                 VALUES (?, ?, CURRENT_TIMESTAMP, 'error', ?)
             ''', (ticker, concept.tag, str(error)))
@@ -331,7 +308,7 @@ class SECDataExtractor:
                     self.logger.debug(f"Rate limit reached. Sleeping for {wait_time:.2f} seconds.")
                     print(f"⏳ Rate limit reached. Sleeping for {wait_time:.2f} seconds.")
                     time.sleep(wait_time)
-        
+
         try:
             self.logger.debug(f"Attempting API call for {ticker}, concept {tag}")
             print(f"📡 Making API call for {ticker}, concept {tag}")
@@ -363,7 +340,7 @@ class SECDataExtractor:
         CHUNK_SIZE = 10  # Process concepts in batches of 10
         print(f"📈 Starting SEC data retrieval for ticker: {ticker}")
         self.logger.info(f"Starting SEC data retrieval for ticker: {ticker}")
-        
+
         def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
             """Optimize DataFrame memory usage by downcasting numeric types."""
             self.logger.debug("Optimizing DataFrame memory usage.")
@@ -376,52 +353,38 @@ class SECDataExtractor:
             print(f"🔧 DataFrame optimized. New memory usage: {df.memory_usage(deep=True).sum()/1024/1024:.2f} MB")
             return df
 
-        # Get all unique dates first from cached data
+        # Collect all concepts to process
+        concepts_to_process = self.SEC_CONCEPTS.copy()
         all_dates = set()
-        valid_concepts = []
-        last_error = None
-        for concept in self.SEC_CONCEPTS:
+
+        # Try to get cached data first to collect dates
+        for concept in concepts_to_process:
             try:
                 cached_data = self.get_cached_concept(ticker, concept)
                 if cached_data is not None and not cached_data.empty:
                     all_dates.update(cached_data['filing_date'])
-                    valid_concepts.append(concept)
-                    self.logger.debug(f"Concept {concept.tag} for {ticker} found in cache.")
-                    print(f"✅ Concept {concept.tag} for {ticker} found in cache.")
             except Exception as e:
-                last_error = str(e)
                 self.logger.error(f"Error accessing cached data for {ticker}, concept {concept.tag}: {e}")
-                print(f"❌ Error accessing cached data for {ticker}, concept {concept.tag}: {e}")
-                continue
-        
-        if not all_dates or not valid_concepts:
-            if last_error:
-                self.logger.warning(f"No SEC data found for {ticker}. Last error: {last_error}")
-                print(f"⚠️ No SEC data found for {ticker}. Last error: {last_error}")
-            else:
-                self.logger.warning(f"No SEC data found for {ticker}.")
-                print(f"⚠️ No SEC data found for {ticker}.")
-                if not all_dates:
-                    print(f"📝 Reason: No filing dates found for ticker {ticker}. This may indicate that there are no recent filings or cached data is missing.")
-                if not valid_concepts:
-                    missing_concepts = [concept.tag for concept in self.SEC_CONCEPTS if concept not in valid_concepts]
-                    print(f"📝 Reason: No valid concepts found for ticker {ticker}. Missing concepts: {missing_concepts}")
-            return pd.DataFrame()
-        
-        # Create base dataframe
-        base_df = pd.DataFrame({'filing_date': sorted(list(all_dates))})
-        base_df = optimize_df(base_df)
-        self.logger.debug(f"Base DataFrame created with {base_df.shape[0]} filing dates.")
-        print(f"📊 Base DataFrame created with {base_df.shape[0]} filing dates.")
-        
+
+        # Initialize base DataFrame
+        if not all_dates:
+            # If no dates from cache, we can proceed without base_df
+            result_df = pd.DataFrame()
+        else:
+            # Create base dataframe
+            result_df = pd.DataFrame({'filing_date': sorted(all_dates)})
+            result_df = optimize_df(result_df)
+            self.logger.debug(f"Base DataFrame created with {result_df.shape[0]} filing dates.")
+            print(f"📊 Base DataFrame created with {result_df.shape[0]} filing dates.")
+
+        # Process concepts in batches
         concept_batches = [
-            valid_concepts[i:i + CHUNK_SIZE] 
-            for i in range(0, len(valid_concepts), CHUNK_SIZE)
+            concepts_to_process[i:i + CHUNK_SIZE]
+            for i in range(0, len(concepts_to_process), CHUNK_SIZE)
         ]
-        self.logger.debug(f"Divided {len(valid_concepts)} concepts into {len(concept_batches)} batches.")
-        print(f"📚 Divided {len(valid_concepts)} concepts into {len(concept_batches)} batches.")
-        
-        result_df = base_df
+        self.logger.debug(f"Divided {len(concepts_to_process)} concepts into {len(concept_batches)} batches.")
+        print(f"📚 Divided {len(concepts_to_process)} concepts into {len(concept_batches)} batches.")
+
         for batch_idx, concept_batch in enumerate(concept_batches, 1):
             self.logger.info(f"Processing concept batch {batch_idx}/{len(concept_batches)}")
             print(f"🔄 Processing concept batch {batch_idx}/{len(concept_batches)}")
@@ -429,14 +392,19 @@ class SECDataExtractor:
             gc.collect()
             self.logger.debug(f"Garbage collection performed after batch {batch_idx}.")
             print(f"🗑️ Garbage collection performed after batch {batch_idx}.")
-        
-        result_df = result_df.sort_values('filing_date', ascending=False)
-        result_df = result_df.drop_duplicates(subset='filing_date')
+
+        if 'filing_date' in result_df.columns:
+            result_df = result_df.sort_values('filing_date', ascending=False)
+            result_df = result_df.drop_duplicates(subset='filing_date')
+            result_df = result_df.reset_index(drop=True)
+        else:
+            self.logger.warning(f"No filing_date column in result_df for {ticker}")
+            print(f"⚠️ No filing_date column in result_df for {ticker}")
+
         self.logger.debug(f"Final DataFrame sorted and deduplicated. Shape: {result_df.shape}")
         print(f"📉 Final DataFrame sorted and deduplicated. Shape: {result_df.shape}")
-        
-        return result_df
 
+        return result_df
 
     def process_concept_batch(self, concepts: List[SECConcept], base_df: pd.DataFrame, ticker: str) -> pd.DataFrame:
         """Process a batch of concepts for a given ticker.
