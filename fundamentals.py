@@ -661,10 +661,10 @@ class SECDataExtractor:
 def main():
     """Main execution function."""
     extractor = SECDataExtractor()
-    
+
     # List of tickers to process. Example.
     tickers = ["AAPL", "NVDA", "MSFT", "ME"]
-    
+
     for ticker in tickers:
         try:
             extractor.logger.info(f"Initiating processing for ticker: {ticker}")
