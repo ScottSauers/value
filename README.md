@@ -125,21 +125,6 @@ NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + ((PP\&E 
 \text{Present Value of FCF} = \sum_{t=1}^{n} \frac{FCF_t}{(1 + r)^t}
 ```
 
-#### Value Ratio Calculation
-
-```math
-\text{Value Ratio} = \frac{\text{Total Value}}{\text{Market Cap}} = \frac{NAV + \text{Present Value of FCF}}{\text{Market Cap}}
-```
-
-Where:
-```math
-NAV = (Cash) + (Receivables \times \alpha) + (Inventory \times \beta) + ((PP\&E + Operating\space Lease\space Assets) \times \gamma) - Total\space Liabilities
-```
-
-```math
-\text{Present Value of FCF} = \sum_{t=1}^{n} \frac{FCF_t}{(1 + r)^t}
-```
-
 ### Value Ratio Calculation Methodology
 
 **Core Formula**  
