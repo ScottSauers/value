@@ -113,7 +113,7 @@ Where:
 #### Value Ratio Calculation
 
 ```math
-\text{Value Ratio} = \frac{\text{Total Value}}{\text{Market Cap}} = \frac{NAV or \text{Present Value of FCF}, whichever is greater}{\text{Market Cap}}
+\text{Value Ratio} = \frac{\text{Total Value}}{\text{Market Cap}} = \frac{\max(\text{NAV}, \text{Present Value of FCF})}{\text{Market Cap}}
 ```
 
 Where:
