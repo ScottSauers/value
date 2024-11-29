@@ -89,7 +89,7 @@ These might mix point-in-time with averages.
 ### Free Cash Flow Calculation
 
 ```math
-Operating\space Cash\space Flow = Revenue - Operating\space Expenses \pm \Delta Working\space Capital
+\text{Operating Cash Flow} = \max(\text{Revenue} - \text{Operating Expenses} \pm \Delta \text{Working Capital}, 0)
 ```
 
 ```math
